@@ -712,7 +712,7 @@ typedef struct st_maria_share
   uint16 *decode_tables;
   uint16 id; /**< 2-byte id by which log records refer to the table */
   /* Called the first time the table instance is opened */
-  my_bool (*once_init)(struct st_maria_share *, File);
+  my_bool (*once_init)(struct st_maria_share *, PAGECACHE_FILE *dfile);
   /* Called when the last instance of the table is closed */
   my_bool (*once_end)(struct st_maria_share *);
   /* Is called for every open of the table */
@@ -1561,7 +1561,8 @@ extern int _ma_write_part_record(MARIA_HA *info, my_off_t filepos,
 extern void _ma_print_key(FILE *stream, MARIA_KEY *key);
 extern void _ma_print_keydata(FILE *stream, HA_KEYSEG *keyseg,
                               const uchar *key, uint length);
-extern my_bool _ma_once_init_pack_row(MARIA_SHARE *share, File dfile);
+extern my_bool _ma_once_init_pack_row(MARIA_SHARE *share,
+                                      PAGECACHE_FILE *dfile);
 extern my_bool _ma_once_end_pack_row(MARIA_SHARE *share);
 extern int _ma_read_pack_record(MARIA_HA *info, uchar *buf,
                                 MARIA_RECORD_POS filepos);

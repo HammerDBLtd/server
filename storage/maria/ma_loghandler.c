@@ -1645,8 +1645,9 @@ static void translog_file_init(TRANSLOG_FILE *file, uint32 number,
 
 static my_bool translog_create_new_file()
 {
-  TRANSLOG_FILE *file= (TRANSLOG_FILE*)my_malloc(PSI_INSTRUMENT_ME, sizeof(TRANSLOG_FILE),
-                                                 MYF(0));
+  TRANSLOG_FILE *file= (TRANSLOG_FILE*)my_malloc(PSI_INSTRUMENT_ME,
+                                                 sizeof(TRANSLOG_FILE),
+                                                 MYF(MY_WME | MY_ZEROFILL));
 
   TRANSLOG_FILE *old= get_current_logfile();
   uint32 file_no= LSN_FILE_NO(log_descriptor.horizon);
@@ -1678,6 +1679,9 @@ static my_bool translog_create_new_file()
 
   if ((file->handler.file= create_logfile_by_number_no_cache(file_no)) == -1)
     goto error_lock;
+  file->handler.pagecache= log_descriptor.pagecache;
+  set_unique_id(&file->handler);
+
   translog_file_init(file, file_no, 0);
 
   log_descriptor.max_file++;
@@ -3830,8 +3834,9 @@ my_bool translog_init_with_table(const char *directory,
           We can't allocate all file together because they will be freed
           one by one
         */
-        TRANSLOG_FILE *file= (TRANSLOG_FILE *)my_malloc(PSI_INSTRUMENT_ME, sizeof(TRANSLOG_FILE),
-                                                        MYF(0));
+        TRANSLOG_FILE *file= (TRANSLOG_FILE *)
+          my_malloc(PSI_INSTRUMENT_ME, sizeof(TRANSLOG_FILE),
+                    MYF(MY_WME | MY_ZEROFILL));
 
         compile_time_assert(MY_FILEPOS_ERROR > 0xffffffffULL);
         if (file == NULL ||
@@ -3850,13 +3855,11 @@ my_bool translog_init_with_table(const char *directory,
             my_free(el);
           }
           if (file)
-          {
             free(file);
-            goto err;
-          }
-          else
-            goto err;
+          goto err;
         }
+        file->handler.pagecache= log_descriptor.pagecache;
+        set_unique_id(&file->handler);
         translog_file_init(file, i, 1);
         /* we allocated space so it can't fail */
         insert_dynamic(&log_descriptor.open_files, (uchar *)&file);
@@ -4034,7 +4037,8 @@ my_bool translog_init_with_table(const char *directory,
   if (!logs_found && !readonly)
   {
     TRANSLOG_FILE *file= (TRANSLOG_FILE*)my_malloc(PSI_INSTRUMENT_ME,
-                                           sizeof(TRANSLOG_FILE), MYF(MY_WME));
+                                           sizeof(TRANSLOG_FILE),
+                                                   MYF(MY_WME | MY_ZEROFILL));
     DBUG_PRINT("info", ("The log is not found => we will create new log"));
     if (file == NULL)
        goto err;
@@ -4050,6 +4054,9 @@ my_bool translog_init_with_table(const char *directory,
     if ((file->handler.file=
          create_logfile_by_number_no_cache(start_file_num)) == -1)
       goto err;
+    file->handler.pagecache= log_descriptor.pagecache;
+    set_unique_id(&file->handler);
+
     log_descriptor.min_file= log_descriptor.max_file= start_file_num;
     if (translog_write_file_header())
       goto err;
@@ -4105,7 +4112,8 @@ my_bool translog_init_with_table(const char *directory,
     Log records will refer to a MARIA_SHARE by a unique 2-byte id; set up
     structures for generating 2-byte ids:
   */
-  id_to_share= (MARIA_SHARE **) my_malloc(PSI_INSTRUMENT_ME, SHARE_ID_MAX * sizeof(MARIA_SHARE*),
+  id_to_share= (MARIA_SHARE **) my_malloc(PSI_INSTRUMENT_ME,
+                                          SHARE_ID_MAX * sizeof(MARIA_SHARE*),
                                           MYF(MY_WME | MY_ZEROFILL));
   if (unlikely(!id_to_share))
     goto err;
@@ -7022,7 +7030,8 @@ translog_variable_length_header(uchar *page, translog_size_t page_offset,
     DBUG_PRINT("info", ("multi-group"));
     grp_no= buff->groups_no= uint2korr(src + 2);
     if (!(buff->groups=
-          (TRANSLOG_GROUP*) my_malloc(PSI_INSTRUMENT_ME, sizeof(TRANSLOG_GROUP) * grp_no,
+          (TRANSLOG_GROUP*) my_malloc(PSI_INSTRUMENT_ME,
+                                      sizeof(TRANSLOG_GROUP) * grp_no,
                                       MYF(0))))
       DBUG_RETURN(RECHEADER_READ_ERROR);
     DBUG_PRINT("info", ("Groups: %u", (uint) grp_no));

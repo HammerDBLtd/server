@@ -142,10 +142,10 @@ static maria_bit_type mask[]=
 };
 
 
-my_bool _ma_once_init_pack_row(MARIA_SHARE *share, File dfile)
+my_bool _ma_once_init_pack_row(MARIA_SHARE *share, PAGECACHE_FILE *dfile)
 {
   share->options|= HA_OPTION_READ_ONLY_DATA;
-  return (_ma_read_pack_info(share, dfile,
+  return (_ma_read_pack_info(share, dfile->file,
                              (pbool)
                              MY_TEST(!(share->options &
                                        (HA_OPTION_PACK_RECORD |

@@ -163,7 +163,8 @@ static inline uchar *dir_entry_pos(uchar *buff, uint block_size, uint pos)
 
 /* ma_blockrec.c */
 void _ma_init_block_record_data(void);
-my_bool _ma_once_init_block_record(MARIA_SHARE *share, File dfile);
+my_bool _ma_once_init_block_record(MARIA_SHARE *share,
+                                   PAGECACHE_FILE *data_file);
 my_bool _ma_once_end_block_record(MARIA_SHARE *share);
 my_bool _ma_init_block_record(MARIA_HA *info);
 void _ma_end_block_record(MARIA_HA *info);
@@ -201,7 +202,7 @@ maria_page_get_lsn(uchar *page, pgcache_page_no_t page_no, uchar* data_ptr);
 /* ma_bitmap.c */
 extern const char *bits_to_txt[];
 
-my_bool _ma_bitmap_init(MARIA_SHARE *share, File file,
+my_bool _ma_bitmap_init(MARIA_SHARE *share, PAGECACHE_FILE *dfile,
                         pgcache_page_no_t *last_page);
 my_bool _ma_bitmap_end(MARIA_SHARE *share);
 my_bool _ma_bitmap_flush(MARIA_SHARE *share);

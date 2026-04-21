@@ -415,7 +415,8 @@ void _ma_init_block_record_data(void)
 }
 
 
-my_bool _ma_once_init_block_record(MARIA_SHARE *share, File data_file)
+my_bool _ma_once_init_block_record(MARIA_SHARE *share,
+                                   PAGECACHE_FILE *data_file)
 {
   my_bool res;
   pgcache_page_no_t last_page; 

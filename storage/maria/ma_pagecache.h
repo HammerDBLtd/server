@@ -23,6 +23,7 @@ C_MODE_START
 #include "ma_loghandler_lsn.h"
 #include <m_string.h>
 #include <hash.h>
+#include <my_atomic.h>
 
 /* Type of the page */
 enum pagecache_page_type
@@ -104,6 +105,9 @@ typedef struct st_pagecache_file
   size_t head_blocks;
   /* size of a big block for S3 or 0 */
   size_t big_block_size;
+  /* unique id, used as an identifier for files_in_flush */
+  ulonglong id;
+
   /* File number */
   File file;
 
@@ -163,6 +167,7 @@ typedef struct st_pagecache
   size_t cnt_for_resize_op;      /* counter to block resize operation        */
   size_t blocks_available;       /* number of blocks available in the LRU chain */
   ssize_t blocks;                /* max number of blocks in the cache        */
+  uint64 counter;                /* Used to update PAGECACHE_FILE.id */
   uint32 block_size;             /* size of the page buffer of a cache block */
   PAGECACHE_HASH_LINK **hash_root;/* arr. of entries into hash table buckets */
   PAGECACHE_HASH_LINK *hash_link_root;/* memory for hash table links         */
@@ -373,6 +378,14 @@ static inline PAGECACHE *multi_get_pagecache(PAGECACHES *pagecaches)
 {
   return pagecaches->caches + (pagecaches->requests++ % pagecaches->segments);
 }
+
+
+static inline void set_unique_id(PAGECACHE_FILE *file)
+{
+  DBUG_ASSERT(file->id == 0);
+  file->id= my_atomic_add64(&file->pagecache->counter, 1);
+}
+
 
 /* Pagecache stats */
 

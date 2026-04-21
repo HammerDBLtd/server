@@ -212,7 +212,7 @@ static inline my_bool write_changed_bitmap(MARIA_SHARE *share,
   SYNOPSIS
     _ma_bitmap_init()
     share		Share handler
-    file		Data file handler
+    data_file		Data file handler
     last_page		Pointer to last page (max_file_size) that needs to be
 			mapped by the bitmap. This is adjusted to bitmap
                         alignment.
@@ -225,7 +225,7 @@ static inline my_bool write_changed_bitmap(MARIA_SHARE *share,
     1   error
 */
 
-my_bool _ma_bitmap_init(MARIA_SHARE *share, File file,
+my_bool _ma_bitmap_init(MARIA_SHARE *share, PAGECACHE_FILE *data_file,
                         pgcache_page_no_t *last_page)
 {
   uint aligned_bit_blocks;
@@ -246,8 +246,9 @@ my_bool _ma_bitmap_init(MARIA_SHARE *share, File file,
 
   bitmap->share= share;
   bitmap->block_size= share->block_size;
-  bitmap->file.file= file;
-  bitmap->file.pagecache= share->kfile.pagecache;
+  bitmap->file.file=      data_file->file;
+  bitmap->file.pagecache= data_file->pagecache;
+  bitmap->file.id=        data_file->id;
   _ma_bitmap_set_pagecache_callbacks(&bitmap->file, share);
 
   /* Size needs to be aligned on 6 */

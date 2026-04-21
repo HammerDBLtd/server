@@ -33,7 +33,7 @@
 static void setup_key_functions(MARIA_KEYDEF *keyinfo);
 static my_bool maria_scan_init_dummy(MARIA_HA *info);
 static void maria_scan_end_dummy(MARIA_HA *info);
-static my_bool maria_once_init_dummy(MARIA_SHARE *, File);
+static my_bool maria_once_init_dummy(MARIA_SHARE *, PAGECACHE_FILE *dfile);
 static my_bool maria_once_end_dummy(MARIA_SHARE *);
 static uchar *_ma_state_info_read(uchar *, MARIA_STATE_INFO *, myf);
 
@@ -75,8 +75,7 @@ MARIA_HA *_ma_test_if_reopen(const char *filename)
   SYNOPSIS
     maria_clone_internal()
     share	Share of already open table
-    data_file   Filedescriptor of data file to use < 0 if one should open
-	        open it.
+    data_file   Filedescriptor of data file to use if != 0
     internal_table <> 0 if this is an internal temporary table
 
  RETURN
@@ -85,7 +84,7 @@ MARIA_HA *_ma_test_if_reopen(const char *filename)
 */
 
 static MARIA_HA *maria_clone_internal(MARIA_SHARE *share,
-                                      File data_file,
+                                      PAGECACHE_FILE *data_file,
                                       uint internal_table,
                                       struct ms3_st *s3)
 {
@@ -99,10 +98,13 @@ static MARIA_HA *maria_clone_internal(MARIA_SHARE *share,
   errpos= 0;
   bzero((uchar*) &info,sizeof(info));
 
-  if (data_file >= 0)
+  if (data_file->file >= 0)
   {
-    info.dfile.file= data_file;
-    info.dfile.pagecache= share->pagecache;
+    /* Check if from aria_check without a pagecache */
+    DBUG_ASSERT(data_file->id > 0 || data_file->pagecache == 0);
+    info.dfile.file=      data_file->file;
+    info.dfile.pagecache= data_file->pagecache;
+    info.dfile.id=        data_file->id;
   }
   else if (_ma_open_datafile(&info, share))
     goto err;
@@ -237,7 +239,7 @@ err:
     my_free(m_info);
     /* fall through */
   case 5:
-    if (data_file < 0)
+    if (data_file->file < 0)
       mysql_file_close(info.dfile.file, MYF(0));
     break;
   }
@@ -278,7 +280,7 @@ MARIA_HA *maria_open(const char *name, int mode, uint open_flags,
   my_off_t key_root[HA_MAX_POSSIBLE_KEY];
   ulonglong max_key_file_length, max_data_file_length;
   my_bool versioning= 1, born_transactional;
-  File data_file= -1, kfile= -1;
+  File kfile= -1;
   struct ms3_st *s3_client= 0;
   S3_INFO *share_s3= 0;
   S3_BLOCK index_header;
@@ -288,6 +290,7 @@ MARIA_HA *maria_open(const char *name, int mode, uint open_flags,
   head_length=sizeof(share_buff.state.header);
   bzero((uchar*) &info,sizeof(info));
   bzero((uchar*) &index_header, sizeof(index_header));
+  info.dfile.file= -1;
 
 #ifndef WITH_S3_STORAGE_ENGINE
   DBUG_ASSERT(!s3);
@@ -861,10 +864,14 @@ MARIA_HA *maria_open(const char *name, int mode, uint open_flags,
                          share->base.pack_bytes +
                          MY_TEST(share->options & HA_OPTION_CHECKSUM));
     share->kfile.file= kfile;
+
     /* Pagecaches are not initialize when using aria_chk */
     if (maria_pagecaches.initialized)
+    {
       share->pagecache= share->kfile.pagecache=
         multi_get_pagecache(&maria_pagecaches);
+      set_unique_id(&share->kfile);
+    }
 
     if (open_flags & HA_OPEN_COPY)
     {
@@ -984,11 +991,13 @@ MARIA_HA *maria_open(const char *name, int mode, uint open_flags,
       {
         if (_ma_open_datafile(&info, share))
           goto err;
-        data_file= info.dfile.file;
       }
 #ifdef WITH_S3_STORAGE_ENGINE
       else
-        data_file= info.dfile.file= s3f.unique_file_number();
+      {
+        info.dfile.file= s3f.unique_file_number();
+        set_unique_id(&info.dfile);
+      }
 #endif /* WITH_S3_STORAGE_ENGINE */
     }
     errpos= 5;
@@ -1032,7 +1041,7 @@ MARIA_HA *maria_open(const char *name, int mode, uint open_flags,
 
     _ma_setup_functions(share);
     max_data_file_length= share->base.max_data_file_length;
-    if ((*share->once_init)(share, info.dfile.file))
+    if ((*share->once_init)(share, &info.dfile))
       goto err;
     errpos= 6;
     if (internal_table)
@@ -1178,15 +1187,19 @@ MARIA_HA *maria_open(const char *name, int mode, uint open_flags,
   {
     share= old_info->s;
     if (share->data_file_type == BLOCK_RECORD)
-      data_file= share->bitmap.file.file;       /* Only opened once */
+    {
+      /* The data file is only opened once */
+      info.dfile.file=      share->bitmap.file.file;
+      info.dfile.id=        share->bitmap.file.id;
+      info.dfile.pagecache= share->bitmap.file.pagecache;
+    }
   }
-
 #ifdef WITH_S3_STORAGE_ENGINE
   if (index_header.alloc_ptr)
     s3f.free(&index_header);
 #endif /* WITH_S3_STORAGE_ENGINE */
 
-  if (!(m_info= maria_clone_internal(share, data_file,
+  if (!(m_info= maria_clone_internal(share, &info.dfile,
                                      internal_table, s3_client)))
     goto err;
 
@@ -1224,8 +1237,8 @@ err:
     (*share->once_end)(share);
     /* fall through */
   case 5:
-    if (data_file >= 0 && !s3_client)
-      mysql_file_close(data_file, MYF(0));
+    if (info.dfile.file >= 0 && !s3_client)
+      mysql_file_close(info.dfile.file, MYF(0));
     if (old_info)
       break;					/* Don't remove open table */
     /* fall through */
@@ -2122,6 +2135,11 @@ int _ma_open_datafile(MARIA_HA *info, MARIA_SHARE *share)
                     share->data_mode | O_SHARE | O_CLOEXEC, flags);
   /* Note that share->pagecache may be 0 here if run from aria_chk */
   info->dfile.pagecache= share->bitmap.file.pagecache= share->pagecache;
+  if (info->dfile.pagecache && ! info->dfile.id)
+  {
+    /* We do not yet have an id, set it. We where probably called by aria_chk */
+    set_unique_id(&info->dfile);
+  }
   return info->dfile.file >= 0 ? 0 : 1;
 }
 
@@ -2143,6 +2161,7 @@ int _ma_open_keyfile(MARIA_SHARE *share)
     This is needed as we don't want to change pagecache in ma_sort_index()
     as we want to check pagecache concistency in ma_close().
   */
+  set_unique_id(&share->kfile);
   mysql_mutex_unlock(&share->intern_lock);
   return (share->kfile.file < 0);
 }
@@ -2159,6 +2178,9 @@ void ma_change_pagecache(MARIA_HA *info)
   DBUG_ASSERT(share->pagecache == 0);
   share->pagecache= share->bitmap.file.pagecache= share->kfile.pagecache=
     info->dfile.pagecache= multi_get_pagecache(&maria_pagecaches);
+  set_unique_id(&share->kfile);
+  set_unique_id(&info->dfile);
+  share->bitmap.file.id= info->dfile.id;
 }
 
 
@@ -2278,7 +2300,8 @@ static void maria_scan_end_dummy(MARIA_HA *info __attribute__((unused)))
 
 static my_bool maria_once_init_dummy(MARIA_SHARE *share
                                      __attribute__((unused)),
-                                     File dfile __attribute__((unused)))
+                                     PAGECACHE_FILE *dfile
+                                     __attribute__((unused)))
 {
   return 0;
 }

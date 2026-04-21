@@ -110,7 +110,7 @@ static my_bool pagecache_extra_debug= 1;
               "rdlocks_q: %u  pins: %u  type: %s", \
               (B), \
               (ulong)((B)->hash_link ? \
-                      (B)->hash_link->file.file : \
+                      (B)->hash_link->file.id : \
                       0), \
               (ulong)((B)->hash_link ? \
                       (B)->hash_link->pageno : \
@@ -357,7 +357,7 @@ struct st_pagecache_block_link
 /** @brief information describing a run of flush_pagecache_blocks_int() */
 struct st_file_in_flush
 {
-  File file;
+  ulonglong id;
   /**
      @brief threads waiting for the thread currently flushing this file to be
      done
@@ -514,8 +514,8 @@ static void test_key_cache(PAGECACHE *pagecache,
 #endif
 
 #define PAGECACHE_HASH(p, f, pos) (((size_t) (pos) +                          \
-                                    (size_t) (f).file) & (p->hash_entries-1))
-#define FILE_HASH(f,cache) ((uint) (f).file & (cache->changed_blocks_hash_size-1))
+                                    (size_t) (f).id) & (p->hash_entries-1))
+#define FILE_HASH(f,cache) ((uint) (f).id & (cache->changed_blocks_hash_size-1))
 
 #define DEFAULT_PAGECACHE_DEBUG_LOG  "pagecache_debug.log"
 
@@ -804,8 +804,9 @@ size_t init_pagecache(PAGECACHE *pagecache, size_t use_mem,
     if (mysql_mutex_init(key_PAGECACHE_cache_lock,
                          &pagecache->cache_lock, MY_MUTEX_INIT_FAST) ||
         my_hash_init(PSI_INSTRUMENT_ME, &pagecache->files_in_flush,
-                     &my_charset_bin, 32, offsetof(struct st_file_in_flush, file),
-                     sizeof(((struct st_file_in_flush *)NULL)->file),
+                     &my_charset_bin, 32, offsetof(struct st_file_in_flush,
+                                                   id),
+                     sizeof(((struct st_file_in_flush *)NULL)->id),
                      NULL, NULL, 0))
       goto err;
     pagecache->inited= 1;
@@ -916,6 +917,7 @@ size_t init_pagecache(PAGECACHE *pagecache, size_t use_mem,
 
   pagecache->cnt_for_resize_op= 0;
   pagecache->resize_in_flush= 0;
+  pagecache->counter= 1;                    /* Start counter from 1 */
   pagecache->can_be_used= 1;
 
   pagecache->waiting_for_hash_link.last_thread= NULL;
@@ -1673,9 +1675,11 @@ static inline void link_hash(PAGECACHE_HASH_LINK **start,
 static void unlink_hash(PAGECACHE *pagecache, PAGECACHE_HASH_LINK *hash_link)
 {
   DBUG_ENTER("unlink_hash");
-  DBUG_PRINT("enter", ("hash_link: %p  block: %p  fd: %u  pos: %lu  requests: %u",
-                       hash_link, hash_link->block, (uint) hash_link->file.file,
-                       (ulong) hash_link->pageno,
+  DBUG_PRINT("enter", ("hash_link: %p  block: %p  fd: %u  id: %llu  pos: %lu  "
+                       "requests: %u",
+                       hash_link, hash_link->block,
+                       (uint) hash_link->file.file,
+                       hash_link->file.id, (ulong) hash_link->pageno,
                        hash_link->requests));
   DBUG_ASSERT(hash_link->requests == 0);
   DBUG_ASSERT(!hash_link->block || hash_link->block->pins == 0);
@@ -1707,7 +1711,7 @@ static void unlink_hash(PAGECACHE *pagecache, PAGECACHE_HASH_LINK *hash_link)
          We notify about the event all threads that ask
          for the same page as the first thread in the queue
       */
-      if (page->file.file == hash_link->file.file &&
+      if (page->file.id == hash_link->file.id &&
           page->pageno == hash_link->pageno)
       {
         DBUG_PRINT("signal", ("thread %s %ld", thread->name,
@@ -1778,7 +1782,7 @@ static PAGECACHE_HASH_LINK *get_present_hash_link(PAGECACHE *pagecache,
   /* Look for an element for the pair (file, pageno) in the bucket chain */
   while (hash_link &&
          (hash_link->pageno != pageno ||
-          hash_link->file.file != file->file))
+          hash_link->file.id != file->id))
   {
     hash_link= hash_link->next;
 #if defined(PAGECACHE_DEBUG)
@@ -1789,8 +1793,11 @@ static PAGECACHE_HASH_LINK *get_present_hash_link(PAGECACHE *pagecache,
       for (i=0, hash_link= **start ;
            i < cnt ; i++, hash_link= hash_link->next)
       {
-        KEYCACHE_DBUG_PRINT("get_present_hash_link", ("fd: %u  pos: %lu",
-            (uint) hash_link->file.file, (ulong) hash_link->pageno));
+        KEYCACHE_DBUG_PRINT("get_present_hash_link",
+                            ("fd: %u  id: %llu  pos: %lu",
+                             (uint) hash_link->file.file,
+                             hash_link->file.id,
+                             (ulong) hash_link->pageno));
       }
     }
     KEYCACHE_DBUG_ASSERT(cnt <= pagecache->hash_links_used);
@@ -1940,8 +1947,8 @@ static PAGECACHE_BLOCK_LINK *find_block(PAGECACHE *pagecache,
   DBUG_ENTER("find_block");
   DBUG_PRINT("enter", ("fd: %d  pos: %lu  wrmode: %d  block_is_copied: %d",
                        file->file, (ulong) pageno, wrmode, block_is_copied));
-  KEYCACHE_PRINT("find_block", ("fd: %d  pos: %lu  wrmode: %d",
-                                file->file, (ulong) pageno,
+  KEYCACHE_PRINT("find_block", ("fd: %u  pos: %lu  wrmode: %d",
+                                (uint) file->file, (ulong) pageno,
                                 wrmode));
 #if !defined(DBUG_OFF) && defined(EXTRA_DEBUG)
   DBUG_EXECUTE("check_pagecache",
@@ -2323,8 +2330,9 @@ restart:
               block, (uint) file->file,
               (ulong) pageno, block->status, (uint) page_status));
   KEYCACHE_PRINT("find_block",
-                 ("block: %p  fd: %d  pos: %lu  block->status: %u  page_status: %d",
-                  block, file->file, (ulong) pageno, block->status,
+                 ("block: %p  fd: %u  pos: %lu  block->status: %u  "
+                  "page_status: %d",
+                  block, (uint) file->file, (ulong) pageno, block->status,
                   page_status));
 
 #if !defined(DBUG_OFF) && defined(EXTRA_DEBUG)
@@ -2448,7 +2456,7 @@ static my_bool pagecache_wait_lock(PAGECACHE *pagecache,
   PCBLOCK_INFO(block);
   if ((block->status & (PCBLOCK_REASSIGNED | PCBLOCK_IN_SWITCH)) ||
       !block->hash_link ||
-      file.file != block->hash_link->file.file ||
+      file.id != block->hash_link->file.id ||
       pageno != block->hash_link->pageno)
   {
     DBUG_PRINT("info", ("the block %p changed => need retry "
@@ -3739,9 +3747,11 @@ uchar *pagecache_read(PAGECACHE *pagecache,
                        page_cache_page_pin_str[new_pin],
                        page_cache_page_pin_str[unlock_pin],
                        MY_TEST(pagecache->big_block_read)));
-  DBUG_ASSERT(buff != 0 || (buff == 0 && (unlock_pin == PAGECACHE_PIN ||
-                                          unlock_pin == PAGECACHE_PIN_LEFT_PINNED)));
+  DBUG_ASSERT(buff != 0 || (buff == 0 &&
+                            (unlock_pin == PAGECACHE_PIN ||
+                             unlock_pin == PAGECACHE_PIN_LEFT_PINNED)));
   DBUG_ASSERT(pageno < ((1ULL) << 40));
+  DBUG_ASSERT(file->id != 0);
 
   if (!page_link)
     page_link= &fake_link;
@@ -3950,7 +3960,7 @@ no_key_cache:					/* Key cache is not used */
 void pagecache_set_write_on_delete_by_link(PAGECACHE_BLOCK_LINK *block)
 {
   DBUG_ENTER("pagecache_set_write_on_delete_by_link");
-  DBUG_PRINT("enter", ("fd: %d block %p  %d -> TRUE",
+  DBUG_PRINT("enter", ("fd: %u  block %p  %d -> TRUE",
                        block->hash_link->file.file,
                        block, (int) block->status & PCBLOCK_DEL_WRITE));
   DBUG_ASSERT(block->pins); /* should be pinned */
@@ -4094,8 +4104,8 @@ my_bool pagecache_delete_by_link(PAGECACHE *pagecache,
   my_bool error= 0;
   enum pagecache_page_pin pin= PAGECACHE_PIN_LEFT_PINNED;
   DBUG_ENTER("pagecache_delete_by_link");
-  DBUG_PRINT("enter", ("fd: %d block %p  %s  %s",
-                       block->hash_link->file.file,
+  DBUG_PRINT("enter", ("fd: %u  block %p  %s  %s",
+                       (uint) block->hash_link->file.file,
                        block,
                        page_cache_page_lock_str[lock],
                        page_cache_page_pin_str[pin]));
@@ -4403,6 +4413,7 @@ my_bool pagecache_write_part(PAGECACHE *pagecache,
   DBUG_ASSERT(offset + size <= pagecache->block_size);
   DBUG_ASSERT(pageno < ((1ULL) << 40));
   DBUG_ASSERT(pagecache->big_block_read == 0);
+  DBUG_ASSERT(file->id != 0);
 
   if (!page_link)
     page_link= &fake_link;
@@ -4900,7 +4911,7 @@ static int flush_cached_blocks(PAGECACHE *pagecache,
                            the block will be passed too.
 
    @note
-     Flushes all blocks having the same OS file descriptor as 'file->file', so
+     Flushes all blocks having the same OS file descriptor as 'file->id', so
      can flush blocks having '*block->hash_link->file' != '*file'.
 
    @note
@@ -4933,9 +4944,9 @@ static int flush_pagecache_blocks_int(PAGECACHE *pagecache,
   int rc= PCFLUSH_OK;
   DBUG_ENTER("flush_pagecache_blocks_int");
   DBUG_PRINT("enter",
-             ("fd: %d  blocks_used: %zu  blocks_changed: %zu  type: %d",
-              file->file, pagecache->blocks_used, pagecache->blocks_changed,
-              type));
+             ("fd: %u  blocks_used: %zu  blocks_changed: %zu  type: %d",
+              (uint) file->file, pagecache->blocks_used,
+              pagecache->blocks_changed, type));
 
 #if !defined(DBUG_OFF) && defined(EXTRA_DEBUG)
     DBUG_EXECUTE("check_pagecache",
@@ -4964,12 +4975,12 @@ static int flush_pagecache_blocks_int(PAGECACHE *pagecache,
 #endif
 
     struct st_file_in_flush us_flusher, *other_flusher;
-    us_flusher.file= file->file;
+    us_flusher.id= file->id;
     us_flusher.flush_queue.last_thread= NULL;
     us_flusher.first_in_switch= FALSE;
     while ((other_flusher= (struct st_file_in_flush *)
-            my_hash_search(&pagecache->files_in_flush, (uchar *)&file->file,
-                           sizeof(file->file))))
+            my_hash_search(&pagecache->files_in_flush, (uchar *)&file->id,
+                           sizeof(file->id))))
     {
       /*
         File is in flush already: wait, unless FLUSH_KEEP_LAZY. "Flusher"
@@ -5026,7 +5037,7 @@ static int flush_pagecache_blocks_int(PAGECACHE *pagecache,
            block;
            block= block->next_changed)
       {
-        if (block->hash_link->file.file == file->file)
+        if (block->hash_link->file.id == file->id)
         {
           count++;
           KEYCACHE_DBUG_ASSERT(count<= pagecache->blocks_used);
@@ -5056,7 +5067,7 @@ restart:
       KEYCACHE_DBUG_ASSERT(cnt <= pagecache->blocks_used);
 #endif
       next= block->next_changed;
-      if (block->hash_link->file.file != file->file)
+      if (block->hash_link->file.id != file->id)
         continue;
       if (filter != NULL)
       {
@@ -5182,7 +5193,7 @@ restart:
         KEYCACHE_DBUG_ASSERT(cnt <= pagecache->blocks_used);
 #endif
         next= block->next_changed;
-        if (block->hash_link->file.file == file->file &&
+        if (block->hash_link->file.id == file->id &&
             !block->pins &&
             (! (block->status & PCBLOCK_CHANGED)
              || type == FLUSH_IGNORE_CHANGED))
@@ -5239,7 +5250,8 @@ int flush_pagecache_blocks_with_filter(PAGECACHE *pagecache,
 {
   int res;
   DBUG_ENTER("flush_pagecache_blocks_with_filter");
-  DBUG_PRINT("enter", ("pagecache: %p  fd: %d", pagecache, file->file));
+  DBUG_PRINT("enter", ("pagecache: %p  fd: %u  id: %llu",
+                       pagecache, (uint) file->file, file->id));
 
   pagecache_pthread_mutex_lock(&pagecache->cache_lock);
   inc_counter_for_resize_op(pagecache);
@@ -5417,7 +5429,7 @@ my_bool pagecache_collect_changed_blocks_with_lsn(PAGECACHE *pagecache,
       table_id= share->id;
       int2store(ptr, table_id);
       ptr+= 2;
-      ptr[0]= (share->kfile.file == block->hash_link->file.file);
+      ptr[0]= (share->kfile.id == block->hash_link->file.id);
       ptr++;
       DBUG_ASSERT(block->hash_link->pageno < ((1ULL) << 40));
       page_store(ptr, block->hash_link->pageno);
@@ -5453,12 +5465,12 @@ err:
 
 void pagecache_file_no_dirty_page(PAGECACHE *pagecache, PAGECACHE_FILE *file)
 {
-  File fd= file->file;
+  ulonglong id= file->id;
   PAGECACHE_BLOCK_LINK *block;
   for (block= pagecache->changed_blocks[FILE_HASH(*file, pagecache)];
        block != NULL;
        block= block->next_changed)
-    if (block->hash_link->file.file == fd)
+    if (block->hash_link->file.id == id)
     {
       DBUG_PRINT("info", ("pagecache_file_not_in error"));
       PCBLOCK_INFO(block);
@@ -5513,7 +5525,7 @@ static void pagecache_dump(PAGECACHE *pagecache)
       fprintf(pagecache_dump_file,
               "thread: %s %ld, (file,pageno)=(%u,%lu)\n",
               thread->name, (ulong) thread->id,
-              (uint) page->file.file,(ulong) page->pageno);
+              (uint) page->file.file, (ulong) page->pageno);
       if (++i == MAX_QUEUE_LEN)
         break;
     }
@@ -5531,7 +5543,7 @@ static void pagecache_dump(PAGECACHE *pagecache)
               "thread: %s %u hash_link:%u (file,pageno)=(%u,%lu)\n",
               thread->name, (ulong) thread->id,
               (uint) PAGECACHE_HASH_LINK_NUMBER(pagecache, hash_link),
-        (uint) hash_link->file.file,(ulong) hash_link->pageno);
+        (uint) hash_link->file.file, (ulong) hash_link->pageno);
       if (++i == MAX_QUEUE_LEN)
         break;
     }

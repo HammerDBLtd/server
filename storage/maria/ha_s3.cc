@@ -684,6 +684,9 @@ int ha_s3::open(const char *name, int mode, uint open_flags)
       */
       file->s->pagecache= file->s->kfile.pagecache= file->dfile.pagecache=
         &s3_pagecache;
+      set_unique_id(&file->s->kfile);
+      set_unique_id(&file->dfile);
+
       file->dfile.big_block_size= file->s->kfile.big_block_size=
         file->s->bitmap.file.big_block_size= file->s->base.s3_block_size;
       file->s->kfile.head_blocks= file->s->base.keystart / file->s->block_size;

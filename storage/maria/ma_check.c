@@ -3269,6 +3269,7 @@ int maria_sort_index(HA_CHECK *param, register MARIA_HA *info, char *name)
   mysql_mutex_lock(&share->intern_lock);
   mysql_file_close(share->kfile.file, MYF(MY_WME));
   share->kfile.file = -1;
+  share->kfile.id= 0;
   mysql_mutex_unlock(&share->intern_lock);
   mysql_file_close(new_file, MYF(MY_WME));
   if (maria_change_to_newfile(share->index_file_name.str, MARIA_NAME_IEXT,
@@ -6704,7 +6705,7 @@ static my_bool create_new_data_handle(MARIA_SORT_PARAM *param, File new_file)
     (*new_info->s->end)(new_info);
     restore_data_file_type(new_info->s);
     _ma_setup_functions(new_info->s);
-    if ((*new_info->s->once_init)(new_info->s, new_file) ||
+    if ((*new_info->s->once_init)(new_info->s, &new_info->dfile) ||
         (*new_info->s->init)(new_info))
       DBUG_RETURN(1);
   }
