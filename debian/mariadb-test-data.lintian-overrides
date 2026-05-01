@@ -414,8 +414,6 @@ package-contains-documentation-outside-usr-share-doc [usr/share/mysql/mariadb-te
 package-contains-documentation-outside-usr-share-doc [usr/share/mysql/mariadb-test/std_data/new-format-relay-log-win.info]
 package-contains-documentation-outside-usr-share-doc [usr/share/mysql/mariadb-test/std_data/new-format-relay-log.info]
 package-contains-documentation-outside-usr-share-doc [usr/share/mysql/mariadb-test/std_data/numbers.txt]
-package-contains-documentation-outside-usr-share-doc [usr/share/mysql/mariadb-test/std_data/old-format-relay-log-win.info]
-package-contains-documentation-outside-usr-share-doc [usr/share/mysql/mariadb-test/std_data/old-format-relay-log.info]
 package-contains-documentation-outside-usr-share-doc [usr/share/mysql/mariadb-test/std_data/unicode/allkeys1400.txt]
 package-contains-documentation-outside-usr-share-doc [usr/share/mysql/mariadb-test/std_data/unicode/allkeys400.txt]
 package-contains-documentation-outside-usr-share-doc [usr/share/mysql/mariadb-test/std_data/unicode/allkeys520.txt]

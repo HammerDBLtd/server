@@ -1,0 +1,30 @@
+--echo #
+--echo # MDEV-38020: Master & relay log info files read 2^31 and above incorrectly
+--echo #
+
+--source include/have_binlog_format_mixed.inc # format-agnostic
+--let $rpl_skip_start_slave= 1
+--source include/master-slave.inc
+--connection server_2
+
+# Create a relay-log.info file with a position value > 2^31
+--let $MYSQLD_DATADIR= `select @@datadir`
+--remove_file $MYSQLD_DATADIR/relay-log.info
+--write_file $MYSQLD_DATADIR/relay-log.info
+5
+./slave-relay-bin.000001
+2147483648
+
+0
+EOF
+
+--let $rpl_server_number= 2
+--let $rpl_server_parameters= --skip-slave-start
+--source include/rpl_restart_server.inc
+
+--let $assert_text= relay_log_pos should be 2147483648 after restart
+--let $assert_cond= [SHOW SLAVE STATUS, Relay_Log_Pos, 1] = 2147483648
+--source include/assert.inc
+
+--let $rpl_only_running_threads= 1
+--source include/rpl_end.inc
