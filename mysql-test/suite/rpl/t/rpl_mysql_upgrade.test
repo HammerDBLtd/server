@@ -45,6 +45,7 @@ SET GLOBAL log_output = 'FILE';
 
 connection master;
 #With '--force' option, mysql_upgrade always executes all sql statements for upgrading.
+--disable_warnings
 ALTER TABLE mysql.slow_log DROP COLUMN thread_id, DROP COLUMN rows_affected;
 DROP DATABASE `mysqltest-1`;
 sync_slave_with_master;
