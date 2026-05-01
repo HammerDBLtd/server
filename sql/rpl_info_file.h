@@ -19,7 +19,7 @@
 #define RPL_INFO_FILE_H
 
 #include <cstdint>    // uintN_t
-#include <functional> // superclass of Info_file::Mem_fn
+#include <functional> // Info_file::each_line()
 #include <my_sys.h>   // IO_CACHE, FN_REFLEN, ...
 
 
@@ -218,150 +218,107 @@ struct Info_file
     }
   };
 
-
-  virtual ~Info_file()= default;
-  virtual bool load_from_file()= 0;
-  virtual void save_to_file()= 0;
-
 protected:
-
-  /**
-    std::Mem_fn()-like nullable replacement for
-    [member pointer upcasting](https://wg21.link/P0149R3)
-  */
-  struct Mem_fn: std::function<Persistent &(Info_file *self)>
+  struct: Persistent
   {
-    /// Null Constructor
-    Mem_fn(std::nullptr_t null= nullptr):
-      std::function<Persistent &(Info_file *)>(null) {}
-    /** Non-Null Constructor
-      @tparam T CRTP subclass of Info_file
-      @tparam M @ref Persistent subclass of the member
-      @param pm member pointer
-    */
-    template<class T, typename M> Mem_fn(M T::* pm):
-      std::function<Persistent &(Info_file *)>(
-        [pm](Info_file *self) -> Persistent &
-        { return self->*static_cast<M Info_file::*>(pm); }
-      ) {}
-  };
-
-  /**
-    (Re)load the MySQL line-based section from the @ref file
-    @param value_list
-      List of wrapped member pointers to values. The first element must be a
-      file name @ref String_value to be unambiguous with the line count line.
-    @param default_line_count
-      We cannot simply read lines until EOF as all versions
-      of MySQL/MariaDB may generate more lines than needed.
-      Therefore, starting with MySQL/MariaDB 4.1.x for @ref Master_info_file and
-      5.6.x for @ref Relay_log_info_file, the first line of the file is number
-      of one-line-per-value lines in the file, including this line count itself.
-      This parameter specifies the number of effective lines before those
-      versions (i.e., not counting the line count line if it was to have one),
-      where the first line is a filename with extension
-      (either contains a `.` or is entirely empty) rather than an integer.
-    @return `false` if the file has parsed successfully or `true` if error
-  */
-  template<size_t size> bool load_from_file(
-    const Mem_fn (&value_list)[size],
-    size_t default_line_count= 0
-  ) { return load_from_file(value_list, size, default_line_count); }
-  /**
-    Flush the MySQL line-based section to the @ref file
-    @param value_list List of wrapped member pointers to values.
-    @param total_line_count
-      The number of lines to describe the file as on the first line of the file.
-      If this is larger than `value_list.size()`, suffix the file with empty
-      lines until the line count (including the line count line) is this many.
-      This reservation provides compatibility with MySQL,
-      who has added more old-style lines while MariaDB innovated.
-  */
-  template<size_t size> void save_to_file(
-    const Mem_fn (&value_list)[size],
-    size_t total_line_count= size + /* line count line */ 1
-  ) { return save_to_file(value_list, size, total_line_count); }
-
-private:
-  bool
-  load_from_file(const Mem_fn *values, size_t size, size_t default_line_count)
-  {
-    long val;
-    /**
-      The first row is temporarily stored in the first value. If it is a line
-      count and not a log name (new format), the second row will overwrite it.
-    */
-    auto &line1= dynamic_cast<String_value<> &>(values[0](this));
-    if (line1.load_from(&file))
-      return true;
-    char *end= str2int(line1.buf, 10, 0, INT32_MAX, &val);
-    /**
-      If this first line was not a number - the line count,
-      then it was the first value for real,
-      so the for loop should then skip over it, the index 0 of the list.
-    */
-    size_t i= !end || *end != '\0';
-    /*
-      Set the default after parsing: While std::from_chars() does not replace
-      the output if it failed, it does replace if the line is not fully spent.
-    */
-    size_t line_count= i ? default_line_count: static_cast<size_t>(val);
-    for (; i < line_count; ++i)
+    /// Seek forward one line
+    bool load_from(IO_CACHE *file) override
     {
-      int c;
-      if (i < size) // line known in the `value_list`
-      {
-        const Mem_fn &pm= values[i];
-        if (pm)
-        {
-          if (pm(this).load_from(&file))
-            return true;
-          continue;
+      for (int c;;)
+        switch (c= my_b_get(file)) {
+        case my_b_EOF:
+          return true; // EOF before line end
+        case '\n':
+          return false;
         }
-      }
-      /*
-        Count and discard unrecognized lines.
-        This is especially to prepare for @ref Master_info_file for MariaDB 10.0+,
-        which reserves a bunch of lines before its unique `key=value` section
-        to accomodate any future line-based (old-style) additions in MySQL.
-        (This will make moving from MariaDB to MySQL easier by not
-        requiring MySQL to recognize MariaDB `key=value` lines.)
-      */
-      while ((c= my_b_get(&file)) != '\n')
-        if (c == my_b_EOF)
-          return true; // EOF already?
     }
+    void save_to(IO_CACHE *file) override {} ///< No-op
+  } PLACEHOLDER;
+
+  /**
+    The number of lines save_to_file() should describe the file as
+    on the first line of the file, including the line count line.
+    If this is larger than the number of lines in the list iterated
+    by each_line(), then it will suffix the file with empty lines
+    until the line count (including the line count line) is this many.
+    This reservation provides compatibility with MySQL,
+    who has added more old-style lines while MariaDB innovated.
+  */
+  virtual uint32_t mysql_line_count_to_save()= 0;
+
+  template<class E= Persistent>
+  using Each_callback= const std::function<bool (E &)> &&;
+  /**
+    Call `callback` with each value in the MySQL line-based section,
+    stop early if a call returns `true`
+    @note This should not need to allocate memory.
+    @return `true` if the for-each stops early, or `false` if all completed
+    @see load_from_file()
+    @see save_to_file()
+  */
+  virtual bool each_line(Each_callback<> callback)= 0;
+
+public:
+  virtual ~Info_file()= default;
+
+  virtual bool load_from_file()
+  {
+    Int_value<uint32_t> line_count;
+    if (line_count.load_from(&file) || !line_count.value--)
+      return true;
+    bool aborted= each_line([file= &file, &line_count] (Persistent &value)
+    {
+      if (!line_count || value.load_from(file)) // condition in `for`
+        return true;
+      --line_count.value; // decrement in `for`
+      return false;
+    });
+    if (!line_count)
+      return false; // Leave any remaining lines as constructed
+    if (aborted) // interrupted mid-file
+      return true;
+    /*
+      Count and discard unrecognized lines.
+      This is especially to prepare for @ref Master_info_file for MariaDB 10.0+,
+      which reserves a bunch of lines before its unique `key=value` section
+      to accomodate any future line-based (old-style) additions in MySQL.
+      (This will make moving from MariaDB to MySQL easier by not
+      requiring MySQL to recognize MariaDB `key=value` lines.)
+    */
+    while (line_count.value--)
+      PLACEHOLDER.load_from(&file);
     return false;
   }
 
-  void save_to_file(const Mem_fn *values, size_t size, size_t total_line_count)
+  virtual void save_to_file()
   {
-    DBUG_ASSERT(total_line_count > size);
+    Int_value<uint32_t> line_count;
     my_b_seek(&file, 0);
+    line_count= mysql_line_count_to_save();
+    DBUG_ASSERT(line_count);
     /*
       If the new contents take less space than the previous file contents,
       then this code would write the file with unerased trailing garbage lines.
       But these garbage don't matter thanks to the number
       of effective lines in the first line of the file.
     */
-    Int_IO_CACHE::to_chars(&file, total_line_count);
-    my_b_write_byte(&file, '\n');
-    for (size_t i= 0; i < size; ++i)
-    {
-      const Mem_fn &pm= values[i];
-      if (pm)
-        pm(this).save_to(&file);
-      my_b_write_byte(&file, '\n');
-    }
+    line_count.save_to(&file);
     /*
-      Pad additional reserved lines:
-      (1 for the line count line + line count) inclusive -> max line inclusive
-       = line count exclusive <- max line inclusive
+      Both this and the loop after it decrement for and close
+      the previous line before writing the current line.
     */
-    for (; total_line_count > size; --total_line_count)
+    each_line([file= &file, &line_count] (Persistent &value)
+    {
+      my_b_write_byte(file, '\n');
+      line_count.value--;
+      DBUG_ASSERT(line_count);
+      value.save_to(file);
+      return false;
+    });
+    // Pad additional reserved lines (`line_count..0`)
+    while (line_count.value--)
       my_b_write_byte(&file, '\n');
   }
-
 };
 
 #endif

@@ -36,21 +36,27 @@ struct Relay_log_info_file: Info_file
   Int_value<uint32_t> sql_delay;
   /// }@
 
-  inline static const Mem_fn VALUE_LIST[] {
-    &Relay_log_info_file::relay_log_file,
-    &Relay_log_info_file::relay_log_pos,
-    &Relay_log_info_file::read_master_log_file,
-    &Relay_log_info_file::read_master_log_pos,
-    &Relay_log_info_file::sql_delay
-  };
-
-  bool load_from_file() override
+protected:
+  uint32_t mysql_line_count_to_save() override { return 6; } ///< @ref sql_delay
+  /**
+    Call `callback` with the list (should not need to allocate memory)
+    of all `null`able values in the MySQL line-based section
+    @return what `callback` returns
+    @see load_from_file()
+    @see save_to_file()
+  */
+  bool each_line(Each_callback<> callback) override
   {
-    return Info_file::load_from_file(VALUE_LIST, /* Exec_Master_Log_Pos */ 4);
-  }
-  void save_to_file() override
-  {
-    return Info_file::save_to_file(VALUE_LIST);
+    for (auto value: std::initializer_list<std::reference_wrapper<Persistent>> {
+      relay_log_file,
+      relay_log_pos,
+      read_master_log_file,
+      read_master_log_pos,
+      sql_delay
+    })
+      if (callback(value))
+        return true;
+    return false;
   }
 };
 

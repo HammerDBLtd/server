@@ -29,10 +29,9 @@ enum struct trilean {};
 #else
 
 #include "rpl_info_file.h"
-#include <unordered_map> // Type of Master_info_file::VALUE_MAP
-#include <string_view>   // Key type of Master_info_file::VALUE_MAP
+#include <unordered_map> // Index for Master_info_file::load_from_file()
+#include <string_view>   // Key type of Master_info_file::KV
 #include <optional>      // Storage type of Master_info_file::Optional_int_value
-#include <unordered_set> // Used by Master_info_file::load_from_file() to dedup
 #include "sql_const.h"   // MAX_PASSWORD_LENGTH
 // Interface type of Master_info_file::master_heartbeat_period
 #include "my_decimal.h"
@@ -541,70 +540,86 @@ struct Master_info_file: Info_file
   /// }@
 
 
-  inline static const Mem_fn VALUE_LIST[] {
-    &Master_info_file::master_log_file,
-    &Master_info_file::master_log_pos,
-    &Master_info_file::master_host,
-    &Master_info_file::master_user,
-    &Master_info_file::master_password,
-    &Master_info_file::master_port,
-    &Master_info_file::master_connect_retry,
-    &Master_info_file::master_ssl,
-    &Master_info_file::master_ssl_ca,
-    &Master_info_file::master_ssl_capath,
-    &Master_info_file::master_ssl_cert,
-    &Master_info_file::master_ssl_cipher,
-    &Master_info_file::master_ssl_key,
-    &Master_info_file::master_ssl_verify_server_cert,
-    &Master_info_file::master_heartbeat_period,
-    nullptr, // &Master_info_file::master_bind, // MDEV-19248
-    &Master_info_file::ignore_server_ids,
-    nullptr, // MySQL `master_uuid`, which MariaDB ignores.
-    &Master_info_file::master_retry_count,
-    &Master_info_file::master_ssl_crl,
-    &Master_info_file::master_ssl_crlpath
-  };
+protected:
+  /// Write the line-based section with some reservations for MySQL additions
+  uint32_t mysql_line_count_to_save() override { return 33; }
+
+  bool each_line(Each_callback<> callback) override
+  {
+    Persistent &master_bind= PLACEHOLDER; ///< MDEV-19248
+    for (auto value: std::initializer_list<std::reference_wrapper<Persistent>> {
+      master_log_file,
+      master_log_pos,
+      master_host,
+      master_user,
+      master_password,
+      master_port,
+      master_connect_retry,
+      master_ssl,
+      master_ssl_ca,
+      master_ssl_capath,
+      master_ssl_cert,
+      master_ssl_cipher,
+      master_ssl_key,
+      master_ssl_verify_server_cert,
+      master_heartbeat_period,
+      master_bind,
+      ignore_server_ids,
+      PLACEHOLDER, // MySQL `master_uuid`, which MariaDB ignores.
+      master_retry_count,
+      master_ssl_crl,
+      master_ssl_crlpath
+    })
+      if (callback(value))
+        return true;
+    return false;
+  }
 
   /**
     Guard agaist extra left-overs at the end of file in case a later update
     causes the effective content to shrink compared to earlier contents
   */
   static constexpr const char END_MARKER[]= "END_MARKER";
-  /** A keyed iterable for the `key=value` section of `@@master_info_file`.
+  using KV= const std::pair<std::string_view, Persistent &>;
+  /**
+    Like each_line(), but for the `key=value` section of `@@master_info_file`.
     For bidirectional compatibility with MySQL
     (codenames only at this writing) and earlier versions of MariaDB,
     keys should match the corresponding old property name in @ref Master_info.
   */
-  // C++ default allocator to match that `mysql_execute_command()` uses `new`
-  inline static
-  const std::unordered_map<std::string_view, const Mem_fn> VALUE_MAP= {
-    /*
-      These are here to annotate whether they are `DEFAULT`.
-      They are repeated from @ref VALUE_LIST to enable bidirectional
-      compatibility with MySQL and earlier versions of MariaDB
-      (where unrecognized keys, such as those from the future, are ignored).
-    */
-    {"connect_retry"    , &Master_info_file::master_connect_retry         },
-    {"ssl"              , &Master_info_file::master_ssl                   },
-    {"ssl_ca"           , &Master_info_file::master_ssl_ca                },
-    {"ssl_capath"       , &Master_info_file::master_ssl_capath            },
-    {"ssl_cert"         , &Master_info_file::master_ssl_cert              },
-    {"ssl_cipher"       , &Master_info_file::master_ssl_cipher            },
-    {"ssl_key"          , &Master_info_file::master_ssl_key               },
-    {"ssl_crl"          , &Master_info_file::master_ssl_crl               },
-    {"ssl_crlpath"      , &Master_info_file::master_ssl_crlpath           },
-    {"ssl_verify_server_cert",
-                          &Master_info_file::master_ssl_verify_server_cert},
-    {"heartbeat_period" , &Master_info_file::master_heartbeat_period      },
-    {"retry_count"      , &Master_info_file::master_retry_count           },
-    // These are the ones new in MariaDB.
-    {"using_gtid",        &Master_info_file::master_use_gtid  },
-    {"do_domain_ids",     &Master_info_file::do_domain_ids    },
-    {"ignore_domain_ids", &Master_info_file::ignore_domain_ids},
-    {END_MARKER, nullptr}
-  };
+  bool each_keyed_line(Each_callback<KV> callback)
+  {
+    using namespace std::string_view_literals;
+    for (auto &value: std::initializer_list<KV> {
+      /*
+        These are here to annotate whether they are `DEFAULT`.
+        They are repeated from each_line() to enable bidirectional
+        compatibility with MySQL and earlier versions of MariaDB
+        (where unrecognized keys, such as those from the future, are ignored).
+      */
+      {"connect_retry"sv         , master_connect_retry         },
+      {"ssl"sv                   , master_ssl                   },
+      {"ssl_ca"sv                , master_ssl_ca                },
+      {"ssl_capath"sv            , master_ssl_capath            },
+      {"ssl_cert"sv              , master_ssl_cert              },
+      {"ssl_cipher"sv            , master_ssl_cipher            },
+      {"ssl_key"sv               , master_ssl_key               },
+      {"ssl_crl"sv               , master_ssl_crl               },
+      {"ssl_crlpath"sv           , master_ssl_crlpath           },
+      {"ssl_verify_server_cert"sv, master_ssl_verify_server_cert},
+      {"heartbeat_period"sv      , master_heartbeat_period      },
+      {"retry_count"sv           , master_retry_count           },
+      // These are the ones new in MariaDB.
+      {"using_gtid"sv       , master_use_gtid  },
+      {"do_domain_ids"sv    , do_domain_ids    },
+      {"ignore_domain_ids"sv, ignore_domain_ids}
+    })
+      if (callback(value))
+        return true;
+    return false;
+  }
 
-
+public:
   Master_info_file(
     DYNAMIC_ARRAY &ignore_server_ids,
     DYNAMIC_ARRAY &do_domain_ids, DYNAMIC_ARRAY &ignore_domain_ids
@@ -612,34 +627,34 @@ struct Master_info_file: Info_file
     ignore_server_ids(ignore_server_ids),
     do_domain_ids(do_domain_ids), ignore_domain_ids(ignore_domain_ids)
   {
-    for (std::unordered_map<std::string_view,
-           const Mem_fn>::const_iterator it= VALUE_MAP.begin();
-         it != VALUE_MAP.end(); ++it)
-      if (it->second)
-        it->second(this).set_default();
+    each_keyed_line([] (KV &keyed_value)
+    {
+      keyed_value.second.set_default();
+      return false;
+    });
   }
 
   bool load_from_file() override
   {
     /// Repurpose the trailing `\0` spot to prepare for the `=` or `\n`
     static constexpr size_t LONGEST_KEY_SIZE= sizeof("ssl_verify_server_cert");
-    if (Info_file::load_from_file(VALUE_LIST, /* MASTER_CONNECT_RETRY */ 7))
+    if (Info_file::load_from_file())
       return true;
-    /*
+    /**
       Info_file::load_from_file() is only for fixed-position entries.
       Proceed with `key=value` lines for MariaDB 10.0 and above:
       The "value" can then be read individually after consuming the`key=`.
     */
-    /**
-      MariaDB 10.0 does not have the `END_MARKER` before any left-overs at
-      the end of the file, so ignore any non-first occurrences of a key.
-      @note
-        This set only "contains" the static strings of @ref VALUE_MAP's keys,
-        which means it can simply compare pointers by face values rather than
-        their pointed content, in contrast with how `HASH` of `include/hash.h`
-        is designed for string contents in a specified charset.
-    */
-    auto seen= std::unordered_set<const char *>();
+    // C++ default allocator to match that `mysql_execute_command()` uses `new`
+    std::unordered_map<KV::first_type, KV::second_type> map=
+      {{END_MARKER, PLACEHOLDER}};
+    each_keyed_line([&map] (KV keyed_line)
+    {
+      std::pair<decltype(map)::iterator, bool> res= map.insert(keyed_line);
+      // `false` if the key is duplicated; `true` otherwise
+      DBUG_ASSERT(res.second);
+      return false;
+    });
     while (true)
     {
       /**
@@ -658,27 +673,23 @@ struct Master_info_file: Info_file
         [[fallthrough]];
         case '\n':
         {
-          decltype(VALUE_MAP)::const_iterator kv=
-            VALUE_MAP.find(std::string_view(
-              key,
-              i // size = exclusive end index of the string
-            ));
+          /*
+            MariaDB 10.0 does not have the `END_MARKER` before any left-overs at
+            the end of the file, so ignore any non-first occurrences of a key.
+            std::unordered_map::extract() removes the key-value.
+          */
+          decltype(map)::node_type kv= map.extract(std::string_view(
+            key,
+            i // size = exclusive end index of the string
+          ));
           // The "unknown" lines would be ignored to facilitate downgrades.
-          if (kv != VALUE_MAP.cend()) // found
+          if (kv) // found
           {
-            const char *key= kv->first.data();
-            if (key == END_MARKER)
+            if (kv.key().data() == END_MARKER)
               return false;
-            /**
-              The `second` member of std::unordered_set::insert()'s return
-              is `true` for a new insertion or `false` for a duplicate.
-            */
-            else if (seen.insert(key).second)
-            {
-              Persistent &value= kv->second(this);
-              if (found_equal ? value.load_from(&file) : value.set_default())
-                return true;
-            }
+            Persistent &value= kv.mapped();
+            if (found_equal ? value.load_from(&file) : value.set_default())
+              return true;
           }
           goto break_for;
         }
@@ -692,28 +703,22 @@ break_for:;
 
   void save_to_file() override
   {
-    // Write the line-based section with some reservations for MySQL additions
-    Info_file::save_to_file(VALUE_LIST, 33);
+    Info_file::save_to_file();
     /* Write MariaDB `key=value` lines:
       The "value" can then be written individually after generating the`key=`.
     */
-    for (std::unordered_map<std::string_view,
-           const Mem_fn>::const_iterator it= VALUE_MAP.begin();
-         it != VALUE_MAP.end(); ++it)
+    each_keyed_line([file= &file] (KV &keyed_line)
     {
-      if (it->second)
+      my_b_write(file, reinterpret_cast<const uchar *>(keyed_line.first.data()),
+        keyed_line.first.size());
+      if (!keyed_line.second.is_default())
       {
-        Persistent &value= it->second(this);
-        my_b_write(&file,
-                   reinterpret_cast<const uchar *>(it->first.data()), it->first.size());
-        if (!value.is_default())
-        {
-          my_b_write_byte(&file, '=');
-          value.save_to(&file);
-        }
-        my_b_write_byte(&file, '\n');
+        my_b_write_byte(file, '=');
+        keyed_line.second.save_to(file);
       }
-    }
+      my_b_write_byte(file, '\n');
+      return false;
+    });
     my_b_write(&file, reinterpret_cast<const uchar *>(END_MARKER),
                sizeof(END_MARKER) - /* the '\0' */ 1);
     my_b_write_byte(&file, '\n');
