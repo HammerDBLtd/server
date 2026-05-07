@@ -3744,6 +3744,53 @@ id	key1
 3	2
 drop table t1;
 #
+# MDEV-39323: CROSS JOIN query returns wrong result with NOT BETWEEN
+#
+CREATE TABLE t1 (
+c0 float DEFAULT NULL,
+c1 mediumint DEFAULT NULL,
+c2 int DEFAULT NULL,
+UNIQUE KEY c0 (c0),
+UNIQUE KEY c2 (c2),
+KEY i0 (c2, c1, c0),
+KEY i1 (c2),
+KEY i2 (c1)
+);
+INSERT INTO t1 VALUES
+(567621000, -8388608, NULL),
+(0.363988, 0, -1643936528),
+(-422810000, 0, NULL),
+(0, 0, 0),
+(NULL, 0, NULL),
+(NULL, 8388607, NULL),
+(NULL, -8388608, NULL);
+CREATE TABLE t2 (c0 decimal(10,0) unsigned DEFAULT NULL);
+INSERT INTO t2 VALUES (NULL),(NULL),(NULL),(NULL),(NULL),(NULL);
+SELECT t1.c0, t1.c1, t1.c2 FROM t2 CROSS JOIN t1
+WHERE NOT (1 BETWEEN t1.c0 AND t1.c2) AND t1.c1 = t1.c2;
+c0	c1	c2
+0	0	0
+0	0	0
+0	0	0
+0	0	0
+0	0	0
+0	0	0
+SELECT t1.c0, t1.c1, t1.c2 FROM t1
+WHERE NOT (1 BETWEEN t1.c0 AND t1.c2) AND t1.c1 = t1.c2;
+c0	c1	c2
+0	0	0
+SELECT c0, c2 FROM t1 WHERE NOT (1 BETWEEN c0 AND c2);
+c0	c2
+0	0
+0.363988	-1643936528
+567621000	NULL
+SELECT c0, c2 FROM t1 WHERE 1 NOT BETWEEN c0 AND c2;
+c0	c2
+0	0
+0.363988	-1643936528
+567621000	NULL
+DROP TABLE t1, t2;
+#
 # End of 10.11 tests
 #
 set global innodb_stats_persistent= @innodb_stats_persistent_save;

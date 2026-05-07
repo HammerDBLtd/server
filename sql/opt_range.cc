@@ -8621,6 +8621,9 @@ SEL_TREE *Item::get_mm_tree(RANGE_OPT_PARAM *param, Item **cond_ptr)
 }
 
 
+/*
+  Disallow range creation when BETWEEN arguments' types don't match.
+*/
 bool
 Item_func_between::can_optimize_range_const(Item_field *field_item) const
 {
@@ -8660,7 +8663,26 @@ Item_func_between::get_mm_tree(RANGE_OPT_PARAM *param, Item **cond_ptr)
     {
       Item_field *field_item= (Item_field*) (arguments()[i]->real_item());
       if (!can_optimize_range_const(field_item))
+      {
+        /*
+          For NOT BETWEEN the resulting tree is the OR of one tree per
+          NOT BETWEEN argument.  Skipping a disjunct here is wrong
+          because the remaining tree wouldn't scan all rows that satisfy
+          the NOT BETWEEN.  So bail here to avoid building a bad range.
+        */
+        if (negated)
+        {
+          tree= nullptr;
+          break;
+        }
+
+        /*
+          For BETWEEN, dropping a conjunct is fine because the
+          remaining tree is a superset of matching rows and the WHERE
+          clause will filter any extra rows out.
+         */
         continue;
+      }
       SEL_TREE *tmp= get_full_func_mm_tree(param, field_item,
                                            (Item*)(intptr) i);
       if (negated)
