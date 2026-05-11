@@ -1,0 +1,120 @@
+--source include/not_embedded.inc
+
+--echo #
+--echo # Regression test for dump_all_users_roles_and_grants() — the
+--echo # MariaDB branch of the role/grant dump path. Builds a role
+--echo # hierarchy, dumps + restores via mariadb-dump --system=users,
+--echo # diffs the resulting state.
+--echo #
+
+CREATE TABLE backup_global_priv   LIKE mysql.global_priv;
+CREATE TABLE backup_roles_mapping LIKE mysql.roles_mapping;
+CREATE TABLE backup_tables_priv   LIKE mysql.tables_priv;
+INSERT INTO backup_global_priv   SELECT * FROM mysql.global_priv;
+INSERT INTO backup_roles_mapping SELECT * FROM mysql.roles_mapping;
+INSERT INTO backup_tables_priv   SELECT * FROM mysql.tables_priv;
+
+# Trim global_priv to localhost so the dump output stays small.
+DELETE FROM mysql.global_priv WHERE Host NOT IN ('localhost');
+FLUSH PRIVILEGES;
+
+# mariadb.sys is locked by default; unlock for a smaller dump diff.
+ALTER USER 'mariadb.sys'@'localhost' ACCOUNT UNLOCK;
+
+--echo #
+--echo # Hierarchy:
+--echo #   admin_role  -- admin of mid_role
+--echo #   mid_role    -- admin of leaf_role
+--echo #   leaf_role   -- granted to test_user (default)
+--echo #   plain_role  -- granted to test_user (non-default)
+--echo #
+CREATE USER test_user@localhost IDENTIFIED BY 'pw';
+CREATE ROLE admin_role;
+CREATE ROLE mid_role  WITH ADMIN admin_role;
+CREATE ROLE leaf_role WITH ADMIN mid_role;
+CREATE ROLE plain_role;
+GRANT SELECT             ON *.* TO admin_role;
+GRANT INSERT, UPDATE     ON *.* TO mid_role;
+GRANT SHOW DATABASES     ON *.* TO leaf_role;
+GRANT PROCESS            ON *.* TO plain_role;
+GRANT leaf_role  TO test_user@localhost;
+GRANT plain_role TO test_user@localhost;
+SET DEFAULT ROLE leaf_role FOR test_user@localhost;
+
+# Deterministic ordering for the diff below.
+ALTER TABLE mysql.roles_mapping ORDER BY Host, User, Role;
+
+CREATE TABLE expected_users AS SELECT User, Host FROM mysql.global_priv
+  WHERE User IN ('test_user','admin_role','mid_role','leaf_role','plain_role');
+CREATE TABLE expected_roles_mapping AS SELECT * FROM mysql.roles_mapping
+  ORDER BY Host, User, Role;
+
+--exec $MYSQL_DUMP --system=users --replace > $MYSQLTEST_VARDIR/tmp/dump_roles.sql
+
+DROP USER test_user@localhost;
+DROP ROLE plain_role;
+DROP ROLE leaf_role;
+DROP ROLE mid_role;
+DROP ROLE admin_role;
+
+# The dump issues GRANT PROXY ON ''@'%' TO 'root'@'localhost', which
+# requires PROXY admin on the restoring connection.
+CREATE USER test_restore IDENTIFIED BY 'r';
+GRANT ALL ON *.* TO test_restore WITH GRANT OPTION;
+GRANT PROXY ON ''@'%' TO test_restore WITH GRANT OPTION;
+
+--exec $MYSQL --user=test_restore --password=r --show-warnings < $MYSQLTEST_VARDIR/tmp/dump_roles.sql
+
+DROP USER test_restore;
+
+--echo # User-set diff (expected empty):
+(SELECT 'missing-after-restore' AS tag, User, Host FROM expected_users
+   EXCEPT
+ SELECT 'missing-after-restore' AS tag, User, Host FROM mysql.global_priv)
+UNION
+(SELECT 'extra-after-restore' AS tag, User, Host FROM mysql.global_priv
+   WHERE User IN ('test_user','admin_role','mid_role','leaf_role','plain_role')
+   EXCEPT
+ SELECT 'extra-after-restore' AS tag, User, Host FROM expected_users)
+ORDER BY tag, User, Host;
+
+--echo # roles_mapping diff (expected empty):
+(SELECT 'missing' AS tag, e.* FROM expected_roles_mapping e
+   EXCEPT
+ SELECT 'missing' AS tag, m.* FROM mysql.roles_mapping m)
+UNION
+(SELECT 'extra' AS tag, m.* FROM mysql.roles_mapping m
+   EXCEPT
+ SELECT 'extra' AS tag, e.* FROM expected_roles_mapping e)
+ORDER BY tag, Host, User, Role;
+
+--echo # Default role survived round-trip:
+SELECT User, Host, default_role FROM mysql.user
+  WHERE User='test_user' AND Host='localhost';
+
+--echo # Admin chain survived:
+SELECT User, Host, Role, Admin_option FROM mysql.roles_mapping
+  WHERE Role IN ('mid_role','leaf_role') AND Admin_option='Y'
+  ORDER BY Role, User, Host;
+
+# === Cleanup ===
+DROP USER test_user@localhost;
+DROP ROLE plain_role;
+DROP ROLE leaf_role;
+DROP ROLE mid_role;
+DROP ROLE admin_role;
+DROP TABLE expected_users;
+DROP TABLE expected_roles_mapping;
+
+DELETE FROM mysql.global_priv;
+DELETE FROM mysql.roles_mapping;
+DELETE FROM mysql.tables_priv;
+INSERT INTO mysql.global_priv   SELECT * FROM backup_global_priv;
+INSERT INTO mysql.roles_mapping SELECT * FROM backup_roles_mapping;
+INSERT INTO mysql.tables_priv   SELECT * FROM backup_tables_priv;
+DROP TABLE backup_global_priv;
+DROP TABLE backup_roles_mapping;
+DROP TABLE backup_tables_priv;
+FLUSH PRIVILEGES;
+
+--remove_file $MYSQLTEST_VARDIR/tmp/dump_roles.sql
