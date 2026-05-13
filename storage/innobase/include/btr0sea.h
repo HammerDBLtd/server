@@ -64,9 +64,11 @@ If new_block is already hashed, then any hash index for block is dropped.
 If new_block is not hashed, and block is hashed, then a new hash index is
 built to new_block with the same parameters as block.
 @param new_block   destination page
-@param block       source page (subject to deletion later) */
+@param block       source page (subject to deletion later)
+@param mtr         mini-transaction (to update trx AHI statistics) */
 void btr_search_move_or_delete_hash_entries(buf_block_t *new_block,
-                                            buf_block_t *block) noexcept;
+                                            buf_block_t *block,
+                                            const mtr_t &mtr) noexcept;
 
 /** Drop any adaptive hash index entries that point to an index page.
 @param block        latched block containing index page, or a buffer-unfixed
@@ -84,8 +86,10 @@ void btr_search_drop_page_hash_when_freed(mtr_t *mtr, const page_id_t page_id)
 
 /** Update the page hash index after a single record is inserted on a page.
 @param cursor cursor which was positioned before the inserted record
-@param reorg  whether the page was reorganized */
-void btr_search_update_hash_on_insert(btr_cur_t *cursor, bool reorg) noexcept;
+@param reorg  whether the page was reorganized
+@param mtr    mini-transaction (to update trx AHI statistics) */
+void btr_search_update_hash_on_insert(btr_cur_t *cursor, bool reorg,
+                                      const mtr_t &mtr) noexcept;
 
 /** Updates the page hash index before a single record is deleted from a page.
 @param cursor   cursor positioned on the to-be-deleted record */
@@ -141,6 +145,7 @@ private:
   ATTRIBUTE_COLD void unlock() noexcept;
 
 public:
+  btr_sea() : hit_count(0), miss_count(0), rows_added(0), pages_added(0) {}
 
   /** Check if AHI is enabled for an index.
   @param index the index
@@ -417,6 +422,35 @@ public:
 
   /** Free at shutdown */
   void free() noexcept;
+
+  /** Number of successful adaptive hash index lookups */
+  union {
+    Atomic_counter<size_t> hit_count;
+    size_t hit_count_nonatomic;
+  };
+
+  /** Number of searches down the B-tree (adaptive hash index misses) */
+  union {
+    Atomic_counter<size_t> miss_count;
+    size_t miss_count_nonatomic;
+  };
+
+  /** Number of rows added to the adaptive hash index */
+  union {
+    Atomic_counter<size_t> rows_added;
+    size_t rows_added_nonatomic;
+  };
+
+  /** Number of pages added to the adaptive hash index */
+  union {
+    Atomic_counter<size_t> pages_added;
+    size_t pages_added_nonatomic;
+  };
+
+  /** Snapshots for calculating per-second rates; protected by
+  srv_innodb_monitor_mutex */
+  size_t hit_count_old;
+  size_t miss_count_old;
 };
 
 /** The adaptive hash index */
@@ -432,8 +466,8 @@ extern ulint btr_search_n_hash_fail;
 # define btr_search_sys_create()
 # define btr_search_sys_free()
 # define btr_search_drop_page_hash_index(block, not_garbage)
-# define btr_search_move_or_delete_hash_entries(new_block, block)
-# define btr_search_update_hash_on_insert(cursor, ahi_latch)
+# define btr_search_move_or_delete_hash_entries(new_block, block, mtr)
+# define btr_search_update_hash_on_insert(cursor, ahi_latch, mtr)
 # define btr_search_update_hash_on_delete(cursor)
 # ifdef UNIV_DEBUG
 #  define btr_search_check_marked_free_index(block)

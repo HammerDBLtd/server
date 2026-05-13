@@ -86,21 +86,6 @@ operations by purge as the previous, when it seems to be growing huge.
 throughput clearly from about 100000. */
 #define BTR_CUR_FINE_HISTORY_LENGTH	100000
 
-#ifdef BTR_CUR_HASH_ADAPT
-/** Number of searches down the B-tree in btr_cur_t::search_leaf(). */
-ib_counter_t<ulint, ib_counter_element_t>	btr_cur_n_non_sea;
-/** Old value of btr_cur_n_non_sea.  Copied by
-srv_refresh_innodb_monitor_stats().  Referenced by
-srv_printf_innodb_monitor(). */
-ulint	btr_cur_n_non_sea_old;
-/** Number of successful adaptive hash index lookups in
-btr_cur_t::search_leaf(). */
-ib_counter_t<ulint, ib_counter_element_t>	btr_cur_n_sea;
-/** Old value of btr_cur_n_sea.  Copied by
-srv_refresh_innodb_monitor_stats().  Referenced by
-srv_printf_innodb_monitor(). */
-ulint	btr_cur_n_sea_old;
-#endif /* BTR_CUR_HASH_ADAPT */
 
 #ifdef UNIV_DEBUG
 /* Flag to limit optimistic insert records */
@@ -1078,6 +1063,24 @@ static int btr_latch_prev(rw_lock_type_t rw_latch,
   return ret;
 }
 
+#ifdef BTR_CUR_HASH_ADAPT
+/** Increment successful adaptive hash index lookups */
+static inline void btr_ahi_inc_searches(const mtr_t &mtr) noexcept
+{
+  mtr.trx->n_sea++;
+  if (ha_handler_stats *stats= mtr.trx->active_handler_stats)
+    stats->ahi_searches++;
+}
+
+/** Increment adaptive hash index misses (B-tree fallback) */
+static inline void btr_ahi_inc_searches_btree(const mtr_t &mtr) noexcept
+{
+  mtr.trx->n_non_sea++;
+  if (ha_handler_stats *stats= mtr.trx->active_handler_stats)
+    stats->ahi_searches_btree++;
+}
+#endif /* BTR_CUR_HASH_ADAPT */
+
 dberr_t btr_cur_t::search_leaf(const dtuple_t *tuple, page_cur_mode_t mode,
                                btr_latch_mode latch_mode, mtr_t *mtr)
 {
@@ -1146,12 +1149,12 @@ dberr_t btr_cur_t::search_leaf(const dtuple_t *tuple, page_cur_mode_t mode,
     ut_ad(up_match != uint16_t(~0U) || mode != PAGE_CUR_LE);
     ut_ad(low_match != uint16_t(~0U) || mode != PAGE_CUR_LE);
     DBUG_EXECUTE_IF("btr_cur_n_sea_delay", my_sleep(200000););
-    ++btr_cur_n_sea;
+    btr_ahi_inc_searches(*mtr);
 
     return DB_SUCCESS;
   }
   else
-    ++btr_cur_n_non_sea;
+    btr_ahi_inc_searches_btree(*mtr);
 # endif
 #endif
 
@@ -1430,7 +1433,7 @@ release_tree:
       ut_ad(!index()->table->is_temporary());
       if (!rec_is_metadata(page_cur.rec, *index()) &&
           index()->search_info.hash_analysis_useful())
-        search_info_update();
+        search_info_update(*mtr);
     }
 #endif /* BTR_CUR_HASH_ADAPT */
 
@@ -1670,7 +1673,7 @@ dberr_t btr_cur_t::pessimistic_search_leaf(const dtuple_t *tuple,
       else if (index()->table->is_temporary());
       else if (!rec_is_metadata(page_cur.rec, *index()) &&
                index()->search_info.hash_analysis_useful())
-        search_info_update();
+        search_info_update(*mtr);
 #endif /* BTR_CUR_HASH_ADAPT */
       err= DB_SUCCESS;
     }
@@ -2523,7 +2526,7 @@ fail_err:
 		ut_ad(index->is_instant());
 		ut_ad(flags == BTR_NO_LOCKING_FLAG);
 	} else if (!index->table->is_temporary()) {
-		btr_search_update_hash_on_insert(cursor, reorg);
+		btr_search_update_hash_on_insert(cursor, reorg, *mtr);
 	}
 #endif /* BTR_CUR_HASH_ADAPT */
 
@@ -2696,7 +2699,7 @@ btr_cur_pessimistic_insert(
 			ut_ad(flags & BTR_NO_LOCKING_FLAG);
 			ut_ad(!(flags & BTR_CREATE_FLAG));
 		} else if (!index->table->is_temporary()) {
-			btr_search_update_hash_on_insert(cursor, false);
+			btr_search_update_hash_on_insert(cursor, false, *mtr);
 		}
 #endif /* BTR_CUR_HASH_ADAPT */
 		if (inherit && !(flags & BTR_NO_LOCKING_FLAG)) {

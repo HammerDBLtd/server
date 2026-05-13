@@ -854,6 +854,16 @@ public:
   ha_handler_stats *active_handler_stats;
   /** number of pages accessed in the buffer pool */
   size_t pages_accessed;
+#ifdef BTR_CUR_HASH_ADAPT
+  /** number of successful adaptive hash index lookups */
+  size_t n_sea;
+  /** number of B-tree searches without adaptive hash index */
+  size_t n_non_sea;
+  /** number of rows added to adaptive hash index */
+  size_t n_ahi_rows_added;
+  /** number of pages added to adaptive hash index */
+  size_t n_ahi_pages_added;
+#endif
 
 	const char*	mysql_log_file_name;
 					/*!< if MySQL binlog is used, this field

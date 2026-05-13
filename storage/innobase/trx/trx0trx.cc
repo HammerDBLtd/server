@@ -376,11 +376,23 @@ void trx_t::free() noexcept
   autoinc_locks.make_undefined();
   ut_ad(!active_handler_stats);
 
-  if (size_t n_page_gets= pages_accessed)
-  {
-    pages_accessed= 0;
-    buf_pool.stat.n_page_gets+= n_page_gets;
-  }
+  if (pages_accessed)
+    buf_pool.stat.n_page_gets+= pages_accessed;
+#ifdef BTR_CUR_HASH_ADAPT
+  if (n_sea)
+    btr_search.hit_count+= n_sea;
+  if (n_non_sea)
+    btr_search.miss_count+= n_non_sea;
+  if (n_ahi_rows_added)
+    btr_search.rows_added+= n_ahi_rows_added;
+  if (n_ahi_pages_added)
+    btr_search.pages_added+= n_ahi_pages_added;
+  n_sea= 0;
+  n_non_sea= 0;
+  n_ahi_rows_added= 0;
+  n_ahi_pages_added= 0;
+#endif
+  pages_accessed= 0;
 
   ut_ad(!n_mysql_tables_in_use);
   ut_ad(!mysql_log_file_name);
@@ -1539,11 +1551,24 @@ bool trx_t::commit_cleanup() noexcept
     for (auto &t : mod_tables)
       delete t.second.bulk_store;
 
-  if (size_t n_page_gets= pages_accessed)
-  {
-    pages_accessed= 0;
-    buf_pool.stat.n_page_gets+= n_page_gets;
-  }
+  if (pages_accessed)
+    buf_pool.stat.n_page_gets+= pages_accessed;
+#ifdef BTR_CUR_HASH_ADAPT
+  if (n_sea)
+    btr_search.hit_count+= n_sea;
+  if (n_non_sea)
+    btr_search.miss_count+= n_non_sea;
+  if (n_ahi_rows_added)
+    btr_search.rows_added+= n_ahi_rows_added;
+  if (n_ahi_pages_added)
+    btr_search.pages_added+= n_ahi_pages_added;
+  n_sea= 0;
+  n_non_sea= 0;
+  n_ahi_rows_added= 0;
+  n_ahi_pages_added= 0;
+#endif
+  pages_accessed= 0;
+
   mutex.wr_lock();
   state= TRX_STATE_NOT_STARTED;
   *detailed_error= '\0';

@@ -752,7 +752,9 @@ struct btr_cur_t {
                                   mtr_t &mtr);
 
 #ifdef BTR_CUR_HASH_ADAPT
-  void search_info_update() const noexcept;
+  /** Update adaptive hash index based on search pattern.
+  @param  mtr  mini-transaction (to update trx AHI statistics) */
+  void search_info_update(const mtr_t &mtr) const noexcept;
 
   /** Check if a guessed position for a tree cursor is correct.
   @param tuple  search key
@@ -814,21 +816,6 @@ earlier version of the row.  In rollback we are not allowed to free an
 inherited external field. */
 #define BTR_EXTERN_INHERITED_FLAG	64U
 
-#ifdef BTR_CUR_HASH_ADAPT
-/** Number of searches down the B-tree in btr_cur_t::search_leaf(). */
-extern ib_counter_t<ulint, ib_counter_element_t>	btr_cur_n_non_sea;
-/** Old value of btr_cur_n_non_sea.  Copied by
-srv_refresh_innodb_monitor_stats().  Referenced by
-srv_printf_innodb_monitor(). */
-extern ulint	btr_cur_n_non_sea_old;
-/** Number of successful adaptive hash index lookups in
-btr_cur_t::search_leaf(). */
-extern ib_counter_t<ulint, ib_counter_element_t>	btr_cur_n_sea;
-/** Old value of btr_cur_n_sea.  Copied by
-srv_refresh_innodb_monitor_stats().  Referenced by
-srv_printf_innodb_monitor(). */
-extern ulint	btr_cur_n_sea_old;
-#endif /* BTR_CUR_HASH_ADAPT */
 
 #ifdef UNIV_DEBUG
 /* Flag to limit optimistic insert records */

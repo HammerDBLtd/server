@@ -933,9 +933,11 @@ static size_t truncated_status_writes;
 
 static SHOW_VAR innodb_status_variables[]= {
 #ifdef BTR_CUR_HASH_ADAPT
-  {"adaptive_hash_hash_searches", &export_vars.innodb_ahi_hit, SHOW_SIZE_T},
+  {"adaptive_hash_hash_searches", &btr_search.hit_count_nonatomic, SHOW_SIZE_T},
   {"adaptive_hash_non_hash_searches",
-  &export_vars.innodb_ahi_miss, SHOW_SIZE_T},
+  &btr_search.miss_count_nonatomic, SHOW_SIZE_T},
+  {"adaptive_hash_pages_added", &btr_search.pages_added_nonatomic, SHOW_SIZE_T},
+  {"adaptive_hash_rows_added", &btr_search.rows_added_nonatomic, SHOW_SIZE_T},
 #endif
   {"async_reads_pending",
   &export_vars.async_read_stats.pending_ops, SHOW_SIZE_T},
