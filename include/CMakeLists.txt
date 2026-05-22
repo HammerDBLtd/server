@@ -121,3 +121,46 @@ INSTALL_COMPAT_HEADER(mysql_version.h "
 INSTALL_COMPAT_HEADER(mysql_com.h "
 #include <mariadb_com.h>
 ")
+
+SET(PLUGIN_API_HEADERS
+      mysql/plugin.h
+      mysql/plugin_audit.h
+      mysql/plugin_auth.h
+      mysql/plugin_data_type.h
+      mysql/plugin_encryption.h
+      mysql/plugin_ftparser.h
+      mysql/plugin_function.h
+      mysql/plugin_password_validation.h
+)
+
+SET(PLUGIN_SERVICE_HEADERS
+      mysql/service_base64.h
+      mysql/service_log_warnings.h
+      mysql/service_print_check_msg.h
+      mysql/service_thd_autoinc.h
+      mysql/service_thd_wait.h
+      mysql/service_debug_sync.h
+      mysql/service_logger.h
+      mysql/service_progress_report.h
+      mysql/service_thd_error_context.h
+      mysql/service_wsrep.h
+      mysql/service_encryption_scheme.h
+      mysql/service_md5.h
+      mysql/service_sha1.h
+      mysql/service_thd_mdl.h
+      mysql/services.h
+      mysql/service_encryption.h
+      mysql/service_my_crypt.h
+      mysql/service_sha2.h
+      mysql/service_thd_rnd.h
+      mysql/service_json.h
+      mysql/service_my_print_error.h
+      mysql/service_sql.h
+      mysql/service_thd_specifics.h
+      mysql/service_kill_statement.h
+      mysql/service_my_snprintf.h
+      mysql/service_thd_alloc.h
+      mysql/service_thd_timezone.h)
+
+GENERATED_DOCS_PROJECT(plugin_api MASK "*.h" 
+   ${PLUGIN_API_HEADERS} ${PLUGIN_SERVICE_HEADERS})

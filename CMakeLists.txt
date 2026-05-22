@@ -502,6 +502,9 @@ MARK_AS_ADVANCED(PYTHON_SHEBANG)
 # Add storage engines and plugins.
 CONFIGURE_PLUGINS()
 
+# Find the documentation generation tools and add the DOCS_GENERATE macro
+INCLUDE(${CMAKE_SOURCE_DIR}/cmake/generated_docs.cmake)
+
 ADD_SUBDIRECTORY(include)
 ADD_SUBDIRECTORY(dbug)
 ADD_SUBDIRECTORY(strings)
