@@ -32822,7 +32822,7 @@ void JOIN::init_join_cache_and_keyread()
           tuple.
       */
       if (!(table->file->index_flags(table->file->keyread, 0, 1) & HA_CLUSTERED_INDEX))
-        table->mark_index_columns(table->file->keyread, table->read_set);
+        table->mark_index_columns_for_read(table->file->keyread);
     }
     bool init_for_explain= false;
 
