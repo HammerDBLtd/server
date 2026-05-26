@@ -1,42 +1,8 @@
 version: build-{build}~branch-{branch}
 
-clone_depth: 10
+clone_depth: 1
 
 skip_branch_with_pr: true
-before_build:
-  - ps: |
-      function Get-Remote-Ref($ref) {
-        try {
-          $result = git ls-remote origin $ref 2>$null
-          if (-not $result) {
-            "Warning: Could not fetch remote ref '$ref'"
-            return $null
-          }
-          return ($result -split "`t")[0]
-        } catch {
-          "Warning: Exception while running git ls-remote for '$ref': $_"
-          return $null
-        }
-      }
-      Get-ChildItem Env: | Where-Object { $_.Name -like 'APPVEYOR*COMMIT' } | ForEach-Object { "$($_.Name)=$($_.Value)" }
-      $commit = $env:APPVEYOR_REPO_COMMIT
-      $commit2 = $env:APPVEYOR_PULL_REQUEST_HEAD_COMMIT
-      $branch = $env:APPVEYOR_REPO_BRANCH
-      $latest = $null
-      $mainBranch = $branch -match '^(main|\d+\.\d+)$'
-      if ($env:APPVEYOR_PULL_REQUEST_NUMBER -eq $null) {
-        "Branch build detected"
-        $latest = Get-Remote-Ref "refs/heads/$branch"
-      } else {
-        $pr = $env:APPVEYOR_PULL_REQUEST_NUMBER
-        $latest = Get-Remote-Ref "refs/pull/$pr/head"
-        $mainBranch = $False
-        "Pull Request build detected"
-      }
-      if ($latest -and ($commit -ne $latest) -and ($commit2 -ne $latest) -and (-not $mainBranch)) {
-        "Skipping outdated commit (latest is $latest)"
-        Exit-AppVeyorBuild
-      }
 
 build_script:
   # dump some system info
@@ -52,7 +18,7 @@ build_script:
   - cd _build
   - set BUILD_TYPE=MinSizeRel
   - set GENERATOR=-GNinja
-  - call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
+  - call "C:\Program Files\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvars64.bat"
   - cmake -E time cmake %GENERATOR% .. -DCMAKE_BUILD_TYPE=%BUILD_TYPE% -DMYSQL_MAINTAINER_MODE=ERR -DFAST_BUILD=1 -DBISON_EXECUTABLE=C:\cygwin64\bin\bison.exe -DPLUGIN_PERFSCHEMA=NO -DPLUGIN_FEEDBACK=NO
   - set /A jobs=2*%NUMBER_OF_PROCESSORS%
   - cmake -E time cmake --build . -j %jobs% --config %BUILD_TYPE% --target minbuild
@@ -73,4 +39,4 @@ branches:
     - /bb-/
     - /\d+\.\d+$/
 
-image: Visual Studio 2022
+image: Visual Studio 2026
