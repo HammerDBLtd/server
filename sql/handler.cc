@@ -1799,9 +1799,9 @@ int ha_commit_trans(THD *thd, bool all)
   DBUG_ASSERT(thd->transaction->stmt.ha_list == NULL ||
               trans == &thd->transaction->stmt);
 
-  DBUG_ASSERT(!thd->in_sub_stmt);
+  DBUG_ASSERT(thd->in_sub_stmt_is_ok_for_sub_stmt());
 
-  if (thd->in_sub_stmt)
+  if (!thd->in_sub_stmt_is_ok_for_sub_stmt())
   {
     /*
       Since we don't support nested statement transactions in 5.0,
@@ -2353,7 +2353,7 @@ int ha_rollback_trans(THD *thd, bool all)
   }
 #endif
 
-  if (thd->in_sub_stmt)
+  if (!thd->in_sub_stmt_is_ok_for_sub_stmt())
   {
     DBUG_ASSERT(0);
     /*

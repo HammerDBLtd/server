@@ -1,0 +1,129 @@
+#
+# MDEV-39518 Allow prepared statements in stored functions in assignment
+#
+# P(none,set)-F(none,set)-F(immediate)
+CREATE TABLE t1 (a INT);
+CREATE FUNCTION f_immediate() RETURNS INT
+BEGIN
+EXECUTE IMMEDIATE 'INSERT INTO t1 VALUES (10)';
+RETURN ROW_COUNT();
+END;
+$$
+CREATE FUNCTION f2() RETURNS INT
+BEGIN
+DECLARE nrows INT;
+SET nrows= f_immediate();
+RETURN nrows;
+END;
+$$
+CREATE PROCEDURE p3()
+BEGIN
+DECLARE nrows INT;
+SET nrows= f2();
+SELECT nrows;
+END;
+$$
+CREATE PROCEDURE p3_select()
+BEGIN
+SELECT f2();
+END;
+$$
+CALL p3_select();
+ERROR 0A000: Dynamic SQL is not allowed in stored function or trigger
+CALL p3;
+nrows
+1
+SELECT * FROM t1;
+a
+10
+DROP PROCEDURE p3_select;
+DROP PROCEDURE p3;
+DROP FUNCTION f2;
+DROP FUNCTION f_immediate;
+DROP TABLE t1;
+# P(none,set)-F(none,default)-F(immediate)
+CREATE TABLE t1 (a INT);
+CREATE FUNCTION f_immediate() RETURNS INT
+BEGIN
+EXECUTE IMMEDIATE 'INSERT INTO t1 VALUES (10)';
+RETURN ROW_COUNT();
+END;
+$$
+CREATE FUNCTION f2() RETURNS INT
+BEGIN
+DECLARE nrows INT DEFAULT f_immediate();
+RETURN nrows;
+END;
+$$
+CREATE PROCEDURE p3()
+BEGIN
+DECLARE nrows INT;
+SET nrows= f2();
+SELECT nrows;
+END;
+$$
+CALL p3;
+nrows
+1
+SELECT * FROM t1;
+a
+10
+DROP PROCEDURE p3;
+DROP FUNCTION f2;
+DROP FUNCTION f_immediate;
+DROP TABLE t1;
+# P(none,default)-F(none,set)-F(immediate)
+CREATE TABLE t1 (a INT);
+CREATE FUNCTION f_immediate() RETURNS INT
+BEGIN
+EXECUTE IMMEDIATE 'INSERT INTO t1 VALUES (10)';
+RETURN ROW_COUNT();
+END;
+$$
+CREATE FUNCTION f2() RETURNS INT
+BEGIN
+DECLARE nrows INT;
+SET nrows= f_immediate();
+RETURN nrows;
+END;
+$$
+CREATE PROCEDURE p3()
+BEGIN
+DECLARE nrows INT DEFAULT f2();
+END;
+$$
+CALL p3;
+SELECT * FROM t1;
+a
+10
+DROP PROCEDURE p3;
+DROP FUNCTION f2;
+DROP FUNCTION f_immediate;
+DROP TABLE t1;
+# P(none,default)-F(none,default)-F(immediate)
+CREATE TABLE t1 (a INT);
+CREATE FUNCTION f_immediate() RETURNS INT
+BEGIN
+EXECUTE IMMEDIATE 'INSERT INTO t1 VALUES (10)';
+RETURN ROW_COUNT();
+END;
+$$
+CREATE FUNCTION f2() RETURNS INT
+BEGIN
+DECLARE nrows INT DEFAULT f_immediate();
+RETURN nrows;
+END;
+$$
+CREATE PROCEDURE p3()
+BEGIN
+DECLARE nrows INT DEFAULT f2();
+END;
+$$
+CALL p3;
+SELECT * FROM t1;
+a
+10
+DROP PROCEDURE p3;
+DROP FUNCTION f2;
+DROP FUNCTION f_immediate;
+DROP TABLE t1;

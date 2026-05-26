@@ -1,0 +1,150 @@
+--echo #
+--echo # MDEV-39518 Allow prepared statements in stored functions in assignment
+--echo #
+
+# Call stack: PROCEDURE - FUNCTION - FUNCTION
+
+--echo # P(none,set)-F(none,set)-F(immediate)
+
+CREATE TABLE t1 (a INT);
+
+DELIMITER $$;
+CREATE FUNCTION f_immediate() RETURNS INT
+BEGIN
+  EXECUTE IMMEDIATE 'INSERT INTO t1 VALUES (10)';
+  RETURN ROW_COUNT();
+END;
+$$
+CREATE FUNCTION f2() RETURNS INT
+BEGIN
+  DECLARE nrows INT;
+  SET nrows= f_immediate();
+  RETURN nrows;
+END;
+$$
+CREATE PROCEDURE p3()
+BEGIN
+  DECLARE nrows INT;
+  SET nrows= f2();
+  SELECT nrows;
+END;
+$$
+CREATE PROCEDURE p3_select()
+BEGIN
+  SELECT f2();
+END;
+$$
+DELIMITER ;$$
+--error ER_STMT_NOT_ALLOWED_IN_SF_OR_TRG
+CALL p3_select();
+CALL p3;
+#CALL p3;
+SELECT * FROM t1;
+
+DROP PROCEDURE p3_select;
+DROP PROCEDURE p3;
+DROP FUNCTION f2;
+DROP FUNCTION f_immediate;
+DROP TABLE t1;
+
+
+--echo # P(none,set)-F(none,default)-F(immediate)
+
+CREATE TABLE t1 (a INT);
+
+DELIMITER $$;
+CREATE FUNCTION f_immediate() RETURNS INT
+BEGIN
+  EXECUTE IMMEDIATE 'INSERT INTO t1 VALUES (10)';
+  RETURN ROW_COUNT();
+END;
+$$
+CREATE FUNCTION f2() RETURNS INT
+BEGIN
+  DECLARE nrows INT DEFAULT f_immediate();
+  RETURN nrows;
+END;
+$$
+CREATE PROCEDURE p3()
+BEGIN
+  DECLARE nrows INT;
+  SET nrows= f2();
+  SELECT nrows;
+END;
+$$
+DELIMITER ;$$
+CALL p3;
+#CALL p3;
+SELECT * FROM t1;
+
+DROP PROCEDURE p3;
+DROP FUNCTION f2;
+DROP FUNCTION f_immediate;
+DROP TABLE t1;
+
+
+--echo # P(none,default)-F(none,set)-F(immediate)
+
+CREATE TABLE t1 (a INT);
+
+DELIMITER $$;
+CREATE FUNCTION f_immediate() RETURNS INT
+BEGIN
+  EXECUTE IMMEDIATE 'INSERT INTO t1 VALUES (10)';
+  RETURN ROW_COUNT();
+END;
+$$
+CREATE FUNCTION f2() RETURNS INT
+BEGIN
+  DECLARE nrows INT;
+  SET nrows= f_immediate();
+  RETURN nrows;
+END;
+$$
+CREATE PROCEDURE p3()
+BEGIN
+  DECLARE nrows INT DEFAULT f2();
+END;
+$$
+DELIMITER ;$$
+CALL p3;
+#CALL p3;
+SELECT * FROM t1;
+
+DROP PROCEDURE p3;
+DROP FUNCTION f2;
+DROP FUNCTION f_immediate;
+DROP TABLE t1;
+
+
+--echo # P(none,default)-F(none,default)-F(immediate)
+
+CREATE TABLE t1 (a INT);
+
+DELIMITER $$;
+CREATE FUNCTION f_immediate() RETURNS INT
+BEGIN
+  EXECUTE IMMEDIATE 'INSERT INTO t1 VALUES (10)';
+  RETURN ROW_COUNT();
+END;
+$$
+CREATE FUNCTION f2() RETURNS INT
+BEGIN
+  DECLARE nrows INT DEFAULT f_immediate();
+  RETURN nrows;
+END;
+$$
+CREATE PROCEDURE p3()
+BEGIN
+  DECLARE nrows INT DEFAULT f2();
+END;
+$$
+DELIMITER ;$$
+CALL p3;
+#CALL p3;
+SELECT * FROM t1;
+
+DROP PROCEDURE p3;
+DROP FUNCTION f2;
+DROP FUNCTION f_immediate;
+DROP TABLE t1;

@@ -3890,6 +3890,7 @@ open_and_process_routine(THD *thd, Query_tables_list *prelocking_ctx,
       if (rt != prelocking_ctx->sroutines_list.first ||
           mdl_type != MDL_key::PROCEDURE)
       {
+        MDL_savepoint mdl_savepoint= thd->mdl_context.mdl_savepoint();
         /*
           TODO: If this is a package routine, we should not put MDL
           TODO: on the routine itself. We should put only the package MDL.
@@ -3900,6 +3901,13 @@ open_and_process_routine(THD *thd, Query_tables_list *prelocking_ctx,
         /* Ensures the routine is up-to-date and cached, if exists. */
         if (rt->sp_cache_routine(thd, &sp))
           DBUG_RETURN(TRUE);
+        if (sp && mdl_type == MDL_key::FUNCTION && sp->contains_dynamic_sql())
+        {
+          thd->mdl_context.rollback_to_savepoint(mdl_savepoint);
+          if (dynamic_cast<sp_lex_set_var*>(thd->lex))
+            thd->lex->chop_off_not_own_tables();
+          DBUG_RETURN(FALSE);
+        }
 
         /* Remember the version of the routine in the parse tree. */
         if (check_and_update_routine_version(thd, rt, sp))

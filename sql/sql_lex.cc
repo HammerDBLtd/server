@@ -6993,7 +6993,9 @@ void LEX::sp_variable_declarations_init(THD *thd, int nvars)
 {
   sp_variable *spvar= spcont->get_last_context_variable();
 
-  sphead->reset_lex(thd);
+  sp_lex_local *new_lex;
+  new_lex= new (thd->mem_root) sp_lex_set_var(thd, this);
+  sphead->reset_lex(thd, new_lex);
   spcont->declare_var_boundary(nvars);
   thd->lex->init_last_field(&spvar->field_def, &spvar->name);
 }
@@ -7032,6 +7034,7 @@ bool LEX::sp_variable_declarations_set_default(THD *thd, int nvars,
 
     bool last= i + 1 == (uint) nvars;
     spvar->default_value= dflt_value_item;
+    dflt_value_item->base_flags|= item_base_t::IS_IN_PS_SAFE_CONTEXT;
     /* The last instruction is responsible for freeing LEX. */
     sp_instr_set *is= new (thd->mem_root)
                       sp_instr_set(sphead->instructions(),
@@ -9609,6 +9612,8 @@ bool LEX::set_variable(const Lex_ident_sys_st *name, Item *item,
   sp_pcontext *ctx;
   const Sp_rcontext_handler *rh;
   sp_variable *spv= find_variable(name, &ctx, &rh);
+  if (item && spv)
+    item->base_flags|= item_base_t::IS_IN_PS_SAFE_CONTEXT;
   return spv ? sphead->set_local_variable(thd, ctx, rh, spv, item, this, true,
                                           expr_str) :
                set_system_variable(option_type, name, item);

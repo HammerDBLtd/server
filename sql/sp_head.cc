@@ -256,7 +256,7 @@ sp_get_flags_for_command(LEX *lex)
   */
   case SQLCOM_EXECUTE:
   case SQLCOM_EXECUTE_IMMEDIATE:
-    flags= sp_head::MULTI_RESULTS | sp_head::CONTAINS_DYNAMIC_SQL;
+    flags= sp_head::CONTAINS_DYNAMIC_SQL;
     break;
   case SQLCOM_PREPARE:
   case SQLCOM_DEALLOCATE_PREPARE:

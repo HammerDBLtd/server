@@ -1,0 +1,84 @@
+--echo #
+--echo # MDEV-39518 Allow prepared statements in stored functions in assignment 
+--echo #
+
+# Statements causing implicit or explicit commit are not allowed in functions
+# - DDL statements
+# - COMMIT
+
+--echo #
+--echo # PREPARE/EXECUTE/DEALLOCATE
+--echo #
+
+DELIMITER $$;
+CREATE FUNCTION f1(query TEXT) RETURNS INT
+BEGIN
+  DECLARE nrows INT;
+  PREPARE stmt FROM query;
+  EXECUTE stmt;
+  SET nrows= ROW_COUNT();
+  DEALLOCATE PREPARE stmt;
+  RETURN nrows;
+END;
+$$
+CREATE PROCEDURE p1(query TEXT)
+BEGIN
+  DECLARE nrows INT;
+  SET nrows= f1(query);
+  SELECT nrows;
+  SELECT * FROM t1;
+END;
+$$
+DELIMITER ;$$
+--error ER_COMMIT_NOT_ALLOWED_IN_SF_OR_TRG
+CALL p1('CREATE TABLE t1 (a INT)');
+CREATE TABLE t1 (a INT);
+--error ER_COMMIT_NOT_ALLOWED_IN_SF_OR_TRG
+CALL p1('ALTER TABLE t1 MODIFY a BIGINT');
+--error ER_COMMIT_NOT_ALLOWED_IN_SF_OR_TRG
+CALL p1('DROP TABLE t1');
+--error ER_COMMIT_NOT_ALLOWED_IN_SF_OR_TRG
+CALL p1('COMMIT');
+DROP TABLE t1;
+DROP PROCEDURE p1;
+DROP FUNCTION f1;
+
+
+--echo #
+--echo # Same as above but with EXECUTE IMMEDIATE
+--echo # Statements causing implicit or explicit commit are not allowed, e.g:
+--echo # - DDL statements
+--echo # - COMMIT
+--echo # Even in assignment context
+--echo #
+
+DELIMITER $$;
+CREATE FUNCTION f1(query TEXT) RETURNS INT
+BEGIN
+  DECLARE nrows INT;
+  EXECUTE IMMEDIATE query;
+  SET nrows= ROW_COUNT();
+  RETURN nrows;
+END;
+$$
+CREATE PROCEDURE p1(query TEXT)
+BEGIN
+  DECLARE nrows INT;
+  SET nrows= f1(query);
+  SELECT nrows;
+  SELECT * FROM t1;
+END;
+$$
+DELIMITER ;$$
+--error ER_COMMIT_NOT_ALLOWED_IN_SF_OR_TRG
+CALL p1('CREATE TABLE t1 (a INT)');
+CREATE TABLE t1 (a INT);
+--error ER_COMMIT_NOT_ALLOWED_IN_SF_OR_TRG
+CALL p1('ALTER TABLE t1 MODIFY a BIGINT');
+--error ER_COMMIT_NOT_ALLOWED_IN_SF_OR_TRG
+CALL p1('DROP TABLE t1');
+--error ER_COMMIT_NOT_ALLOWED_IN_SF_OR_TRG
+CALL p1('COMMIT');
+DROP TABLE t1;
+DROP PROCEDURE p1;
+DROP FUNCTION f1;
