@@ -1,0 +1,82 @@
+--source include/have_mariabackup_wrapper.inc
+--source include/have_innodb.inc
+
+--let $defaults=--defaults-file=$MYSQLTEST_VARDIR/my.cnf
+--let $logfile=$MYSQLTEST_VARDIR/tmp/wrapper.log
+--let SEARCH_FILE=$logfile
+--let SEARCH_ABORT=NOT FOUND
+
+CREATE TABLE t1(a INT PRIMARY KEY) ENGINE=InnoDB;
+INSERT INTO t1 VALUES (1), (2), (3);
+
+--echo #
+--echo # Full backup succeeds and runs BACKUP SERVER
+--echo #
+--let $targetdir=$MYSQLTEST_VARDIR/tmp/bk_full
+--exec $XTRABACKUP $defaults --backup --target-dir=$targetdir > $logfile 2>&1
+--let SEARCH_PATTERN=Executing: BACKUP SERVER TO
+--source include/search_pattern_in_file.inc
+--rmdir $targetdir
+
+--echo #
+--echo # (--parallel/--throttle/--no-lock/--safe-slave-backup)
+--echo #
+--let $targetdir=$MYSQLTEST_VARDIR/tmp/bk_legacy
+--exec $XTRABACKUP $defaults --backup --target-dir=$targetdir --parallel=4 --throttle=100 --no-lock --safe-slave-backup > $logfile 2>&1
+--let SEARCH_PATTERN=Executing: BACKUP SERVER TO
+--source include/search_pattern_in_file.inc
+--rmdir $targetdir
+
+--echo #
+--echo # --stream=mbstream emits a valid tar archive to stdout
+--echo #
+--let $targetdir=$MYSQLTEST_VARDIR/tmp/bk_stream
+--let $streamfile=$MYSQLTEST_VARDIR/tmp/bk_stream.tar
+--exec $XTRABACKUP $defaults --backup --target-dir=$targetdir --stream=mbstream > $streamfile 2>$logfile
+--exec tar -tf $streamfile > /dev/null
+--let SEARCH_PATTERN=Creating tar stream
+--source include/search_pattern_in_file.inc
+--rmdir $targetdir
+--remove_file $streamfile
+
+--echo #
+--echo # --compress produces a valid gzip stream
+--echo #
+--let $targetdir=$MYSQLTEST_VARDIR/tmp/bk_gz
+--let $gzfile=$MYSQLTEST_VARDIR/tmp/bk.tar.gz
+--exec $XTRABACKUP $defaults --backup --target-dir=$targetdir --compress > $gzfile 2>$logfile
+--exec gzip -t $gzfile
+--let SEARCH_PATTERN=Compressing with gzip
+--source include/search_pattern_in_file.inc
+--rmdir $targetdir
+--remove_file $gzfile
+
+--echo #
+--echo # Backup into an already-existing target directory is rejected
+--echo #
+--let $targetdir=$MYSQLTEST_VARDIR/tmp/bk_exists
+--mkdir $targetdir
+--error 1
+--exec $XTRABACKUP $defaults --backup --target-dir=$targetdir > $logfile 2>&1
+--let SEARCH_PATTERN=Target directory already exists
+--source include/search_pattern_in_file.inc
+--rmdir $targetdir
+
+--echo #
+--echo # Missing --target-dir is rejected
+--echo #
+--error 1
+--exec $XTRABACKUP $defaults --backup > $logfile 2>&1
+--let SEARCH_PATTERN=--target-dir required
+--source include/search_pattern_in_file.inc
+
+--echo #
+--echo # Non-existent parent directory is rejected
+--echo #
+--error 1
+--exec $XTRABACKUP $defaults --backup --target-dir=$MYSQLTEST_VARDIR/tmp/no_such_parent/bk > $logfile 2>&1
+--let SEARCH_PATTERN=Parent directory does not exist
+--source include/search_pattern_in_file.inc
+
+DROP TABLE t1;
+--remove_file $logfile

@@ -1,0 +1,31 @@
+CREATE TABLE t1(a INT PRIMARY KEY) ENGINE=InnoDB;
+INSERT INTO t1 VALUES (1), (2), (3);
+#
+# Full backup succeeds and runs BACKUP SERVER
+#
+FOUND 1 /Executing: BACKUP SERVER TO/ in wrapper.log
+#
+# (--parallel/--throttle/--no-lock/--safe-slave-backup)
+#
+FOUND 1 /Executing: BACKUP SERVER TO/ in wrapper.log
+#
+# --stream=mbstream emits a valid tar archive to stdout
+#
+FOUND 1 /Creating tar stream/ in wrapper.log
+#
+# --compress produces a valid gzip stream
+#
+FOUND 1 /Compressing with gzip/ in wrapper.log
+#
+# Backup into an already-existing target directory is rejected
+#
+FOUND 1 /Target directory already exists/ in wrapper.log
+#
+# Missing --target-dir is rejected
+#
+FOUND 1 /--target-dir required/ in wrapper.log
+#
+# Non-existent parent directory is rejected
+#
+FOUND 1 /Parent directory does not exist/ in wrapper.log
+DROP TABLE t1;
