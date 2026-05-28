@@ -560,3 +560,19 @@ DROP TABLE t;
 --echo #
 --echo # End of 10.5 tests
 --echo #
+
+--echo #
+--echo # MDEV-26820 Assertion `marked_for_read()' failed upon SELECT with VALUE(virtual column)
+--echo #
+
+CREATE TABLE t1 (a VARCHAR(8), b VARCHAR(8) AS (REPEAT(a,1)) VIRTUAL) ENGINE=MyISAM;
+INSERT INTO t1 (a) VALUES ('foo'),('bar');
+SELECT VALUE(b) FROM (SELECT * FROM t1) sq;
+
+DROP TABLE t1;
+
+CREATE TABLE t1 ( id uuid, vid varchar(255) GENERATED always AS (id)) engine=aria;
+INSERT INTO t1 (id) values (uuid()),(uuid()),(uuid());
+SELECT VALUE( vid ) FROM (select * from t1)dt;
+
+DROP TABLE t1;
