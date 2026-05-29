@@ -36,8 +36,8 @@ static void init_group_counters(Master_info* mi);
 
 Master_info::Master_info(LEX_CSTRING *connection_name_arg,
                          bool is_slave_recovery):
-   Master_info_file(ignore_server_ids, domain_id_filter.m_domain_ids[0],
-                                       domain_id_filter.m_domain_ids[1]),
+   Master_info_file(&ignore_server_ids, &domain_id_filter.m_domain_ids[0],
+                                        &domain_id_filter.m_domain_ids[1]),
    Slave_reporting_capability("I/O"), fd(-1), io_thd(0), rli(is_slave_recovery),
    checksum_alg_before_fd(BINLOG_CHECKSUM_ALG_UNDEF),
    connects_tried(0), binlog_storage_engine(0), inited(0), abort_slave(0),
@@ -202,11 +202,15 @@ void Master_info::clear_in_memory_info(bool all)
 void init_ssl_config(Master_info* mi)
 {
   DBUG_ENTER("init_ssl_config");
-  mi->master_ssl= 1;
-  mi->master_ssl_verify_server_cert= 0;
-  mi->master_ssl_ca= nullptr; mi->master_ssl_capath= nullptr; mi->master_ssl_cert= nullptr;
-  mi->master_ssl_cipher= nullptr; mi->master_ssl_key= nullptr; mi->master_ssl_crl= nullptr;
-  mi->master_ssl_crlpath= nullptr;
+  mi->master_ssl.set_default();
+  mi->master_ssl_verify_server_cert.set_default();
+  mi->master_ssl_ca.set_default();
+  mi->master_ssl_capath.set_default();
+  mi->master_ssl_cert.set_default();
+  mi->master_ssl_cipher.set_default();
+  mi->master_ssl_key.set_default();
+  mi->master_ssl_crl.set_default();
+  mi->master_ssl_crlpath.set_default();
   DBUG_VOID_RETURN;
 }
 
@@ -246,6 +250,44 @@ void init_master_log_pos(Master_info* mi)
   mi->gtid_event_seen= false;
   DBUG_VOID_RETURN;
 }
+
+
+/*
+  Initialize a Master_info instance from its on-disk master_info_fname
+  and slave_info_fname files (the master.info / relay-log.info pair),
+  and prepare the slave I/O cache for reuse.
+
+  If mi->inited is already true, this is a no-op except for the
+  thread_mask & SLAVE_SQL case, where the relay-log read position is
+  rewound to 0 so handle_slave_sql() can re-read its signature header.
+
+  Otherwise:
+   - If master_info_fname does not exist:
+       * If abort_if_no_master_info_file is true, return 0 without
+         inititializing (caller must abort).
+       * Otherwise create an empty master_info_fname file, leave the
+         in-memory mi at its compile-time / Sys_var defaults
+         (clear_in_memory_info), and proceed to relay-log init.
+   - If master_info_fname exists, open it and load all fields from it
+     via mi->load_from_file().
+  Then initialize the relay-log info via mi->rli.init(slave_info_fname).
+
+  @param mi                            Master_info to initialize.
+  @param master_info_fname             Filename of the master.info file
+                                       relative to mysql_data_home.
+  @param slave_info_fname              Filename of the relay-log.info file
+                                       relative to mysql_data_home.
+  @param abort_if_no_master_info_file  When true and the master_info_fname
+                                       is missing, log an error and bail
+                                       without creating it. Used at server
+                                       startup, where a missing file is
+                                       a fatal misconfiguration.
+  @param thread_mask                   Bitmask of SLAVE_IO / SLAVE_SQL
+                                       indicating which slave threads will
+                                       be started. Only SLAVE_SQL has a
+                                       side effect here (relay-log rewind).
+  @return 0 on success, non-zero on error.
+*/
 
 int init_master_info(Master_info* mi, const char* master_info_fname,
                      const char* slave_info_fname,
@@ -726,7 +768,8 @@ bool Master_info_index::init_all_master_info()
 {
   int thread_mask;
   int err_num= 0, succ_num= 0; // The number of success read Master_info
-  Info_file::String_value<MAX_CONNECTION_NAME+1> sign;
+  char sign_buf[MAX_CONNECTION_NAME+1];
+  Info_file::String_value sign{"sign", sign_buf, sizeof(sign_buf)};
   File index_file_nr;
   THD *thd;
   DBUG_ENTER("init_all_master_info");

@@ -194,11 +194,11 @@ class Master_info: public Master_info_file, public Slave_reporting_capability
   }
 
   /* the variables below are needed because we can change masters on the fly */
-  char (&master_log_name)[FN_REFLEN]= master_log_file.buf;
-  char (&host)[HOSTNAME_LENGTH*SYSTEM_CHARSET_MBMAXLEN+1]= master_host.buf;
-  char (&user)[USERNAME_LENGTH+1]= master_user.buf;
+  char (&master_log_name)[FN_REFLEN]= master_log_file_buf;
+  char (&host)[HOSTNAME_LENGTH*SYSTEM_CHARSET_MBMAXLEN+1]= master_host_buf;
+  char (&user)[USERNAME_LENGTH+1]= master_user_buf;
   char (&password)[MAX_PASSWORD_LENGTH*SYSTEM_CHARSET_MBMAXLEN+1]=
-    master_password.buf;
+    master_password_buf;
   LEX_CSTRING connection_name; 		/* User supplied connection name */
   LEX_CSTRING cmp_connection_name;	/* Connection name in lower case */
 

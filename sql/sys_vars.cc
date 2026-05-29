@@ -5784,6 +5784,25 @@ static Sys_var_set Sys_log_output(
        log_output_names, DEFAULT(LOG_FILE), NO_MUTEX_GUARD, NOT_IN_BINLOG,
        ON_CHECK(check_not_empty_set), ON_UPDATE(fix_log_output));
 
+
+/*
+  Default values for the CHANGE MASTER options. Storage is defined
+  unconditionally because rpl_master_info_file.cc (always built, including
+  the embedded server) references these globals. The Sys_var_* registrations
+  below are wrapped in #ifdef HAVE_REPLICATION.
+*/
+uint master_connect_retry;
+double master_heartbeat_period;
+my_bool master_heartbeat_period_is_auto;
+my_bool master_ssl;
+char *master_ssl_ca, *master_ssl_capath, *master_ssl_cert, *master_ssl_cipher;
+char *master_ssl_crl, *master_ssl_crlpath, *master_ssl_key;
+my_bool master_ssl_verify_server_cert;
+ulong master_use_gtid;
+my_bool master_use_gtid_is_auto;
+ulonglong master_retry_count;
+
+
 #ifdef HAVE_REPLICATION
 static Sys_var_mybool Sys_log_slave_updates(
        "log_slave_updates", "Tells the slave to log the updates from "
@@ -6107,6 +6126,107 @@ Sys_slave_net_timeout(
        "from any master/slave connection before aborting the read",
        GLOBAL_VAR(slave_net_timeout), CMD_LINE(REQUIRED_ARG),
        VALID_RANGE(1, LONG_TIMEOUT), DEFAULT(SLAVE_NET_TIMEOUT), BLOCK_SIZE(1));
+
+
+static Sys_var_uint Sys_master_connect_retry(
+       "master_connect_retry",
+       "The DEFAULT value for the CHANGE MASTER option MASTER_CONNECT_RETRY, "
+       "the interval in integer seconds between each try to connect to the "
+       "master",
+       READ_ONLY GLOBAL_VAR(master_connect_retry),
+       CMD_LINE(REQUIRED_ARG), VALID_RANGE(0, UINT_MAX),
+       DEFAULT(60), BLOCK_SIZE(1));
+
+static Sys_var_double Sys_master_heartbeat_period(
+       "master_heartbeat_period",
+       "The DEFAULT value for the CHANGE MASTER option "
+       "MASTER_HEARTBEAT_PERIOD, the interval in seconds between replication "
+       "heartbeats; the auto value is slave_net_timeout/2",
+       AUTO_SET READ_ONLY GLOBAL_VAR(master_heartbeat_period),
+       CMD_LINE(REQUIRED_ARG), VALID_RANGE(0, 4294967.295), DEFAULT(0));
+
+static Sys_var_enum Sys_master_use_gtid(
+       "master_use_gtid",
+       "The DEFAULT value for the CHANGE MASTER option MASTER_USE_GTID, "
+       "which specifies which GTID record (or neither) to start replicating "
+       "from; the auto value is Slave_Pos, or No if the master does not "
+       "support GTIDs",
+       AUTO_SET READ_ONLY GLOBAL_VAR(master_use_gtid),
+       CMD_LINE(REQUIRED_ARG), master_use_gtid_names, DEFAULT(2));
+
+static Sys_var_ulonglong Sys_master_retry_count(
+       "master_retry_count",
+       "The DEFAULT value for the CHANGE MASTER option MASTER_RETRY_COUNT, "
+       "the number of tries to connect to the master before giving up",
+       READ_ONLY GLOBAL_VAR(master_retry_count),
+       CMD_LINE(REQUIRED_ARG), VALID_RANGE(0, ULONGLONG_MAX),
+       DEFAULT(100000), BLOCK_SIZE(1));
+
+static Sys_var_mybool Sys_master_ssl(
+       "master_ssl",
+       "The DEFAULT value for the CHANGE MASTER option MASTER_SSL, "
+       "which is whether to use TLS to connect to the master",
+       READ_ONLY GLOBAL_VAR(master_ssl), CMD_LINE(OPT_ARG), DEFAULT(TRUE));
+
+static Sys_var_charptr_fscs Sys_master_ssl_ca(
+       "master_ssl_ca",
+       "The DEFAULT value for the CHANGE MASTER option MASTER_SSL_CA, an "
+       "optional path to a Certificate Authorities' certificates file for "
+       "TLS replication",
+       READ_ONLY GLOBAL_VAR(master_ssl_ca), CMD_LINE(REQUIRED_ARG),
+       DEFAULT(""));
+
+static Sys_var_charptr_fscs Sys_master_ssl_capath(
+       "master_ssl_capath",
+       "The DEFAULT value for the CHANGE MASTER option MASTER_SSL_CAPATH, "
+       "an optional path to a directory of Certificate Authority's "
+       "certificate files for TLS replication",
+       READ_ONLY GLOBAL_VAR(master_ssl_capath), CMD_LINE(REQUIRED_ARG),
+       DEFAULT(""));
+
+static Sys_var_charptr_fscs Sys_master_ssl_cert(
+       "master_ssl_cert",
+       "The DEFAULT value for the CHANGE MASTER option MASTER_SSL_CERT, "
+       "an optional path to the master's certificate for TLS replication",
+       READ_ONLY GLOBAL_VAR(master_ssl_cert), CMD_LINE(REQUIRED_ARG),
+       DEFAULT(""));
+
+static Sys_var_charptr Sys_master_ssl_cipher(
+       "master_ssl_cipher",
+       "The DEFAULT value for the CHANGE MASTER option MASTER_SSL_CIPHER, "
+       "a list of permitted ciphers for TLS replication",
+       READ_ONLY GLOBAL_VAR(master_ssl_cipher), CMD_LINE(REQUIRED_ARG),
+       DEFAULT(""));
+
+static Sys_var_charptr_fscs Sys_master_ssl_crl(
+       "master_ssl_crl",
+       "The DEFAULT value for the CHANGE MASTER option MASTER_SSL_CRL, "
+       "an optional path to a revoked certificates file for TLS replication",
+       READ_ONLY GLOBAL_VAR(master_ssl_crl), CMD_LINE(REQUIRED_ARG),
+       DEFAULT(""));
+
+static Sys_var_charptr_fscs Sys_master_ssl_crlpath(
+       "master_ssl_crlpath",
+       "The DEFAULT value for the CHANGE MASTER option MASTER_SSL_CRLPATH, "
+       "an optional path to a directory of revoked certificate files for "
+       "TLS replication",
+       READ_ONLY GLOBAL_VAR(master_ssl_crlpath), CMD_LINE(REQUIRED_ARG),
+       DEFAULT(""));
+
+static Sys_var_charptr_fscs Sys_master_ssl_key(
+       "master_ssl_key",
+       "The DEFAULT value for the CHANGE MASTER option MASTER_SSL_KEY, "
+       "an optional path to the master's private key for TLS replication",
+       READ_ONLY GLOBAL_VAR(master_ssl_key), CMD_LINE(REQUIRED_ARG),
+       DEFAULT(""));
+
+static Sys_var_mybool Sys_master_ssl_verify_server_cert(
+       "master_ssl_verify_server_cert",
+       "The DEFAULT value for the CHANGE MASTER option "
+       "MASTER_SSL_VERIFY_SERVER_CERT, which is whether to validate the "
+       "master's certificate in TLS replication",
+       READ_ONLY GLOBAL_VAR(master_ssl_verify_server_cert),
+       CMD_LINE(OPT_ARG), DEFAULT(TRUE));
 
 
 /*
