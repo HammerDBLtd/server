@@ -1,0 +1,36 @@
+# Verify that the post-WL#344 format of `*.info` can be parsed.
+# * Verify that the line count includes the line-count line.
+#   (MDEV-39788 CHANGE MASTER savefiles read and write one line to many)
+# * Verify that position values > 2^31 can be read
+#   (MDEV-38020: Master & relay log info files read 2^31 and above incorrectly)
+
+--source include/have_binlog_format_mixed.inc # format-agnostic
+CHANGE MASTER TO master_host='127.0.0.1'; # have_info_files
+
+--let $MYSQLD_DATADIR= `SELECT @@datadir`
+
+# the new version of relay_log.info comes in two versions: with path
+# separator '/' (most systems) and with path separator '\' (windows)
+if ($SYSTEM_PATH_SEPARATOR != /) {
+  --let $file_suffix= -win
+}
+
+
+--remove_file $MYSQLD_DATADIR/master.info
+# `using_gtid` is the key-value section, not the 33rd option.
+--copy_file $MYSQL_TEST_DIR/std_data/new-format-master.info $MYSQLD_DATADIR/master.info
+
+# This file does not have the 5th option.
+--remove_file $MYSQLD_DATADIR/relay-log.info
+--copy_file $MYSQL_TEST_DIR/std_data/new-format-relay-log$file_suffix.info $MYSQLD_DATADIR/relay-log.info
+
+
+--let $restart_parameters= --skip-slave-start
+--source include/restart_mysqld.inc
+
+--let $status_items= Master_Log_File, Read_Master_Log_Pos, Master_SSL_Key, Using_Gtid, Relay_Log_File, Relay_Log_Pos, SQL_Delay
+--source include/show_slave_status.inc
+
+
+# Reset
+RESET SLAVE ALL;

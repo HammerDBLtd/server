@@ -411,6 +411,7 @@ package-contains-documentation-outside-usr-share-doc [usr/share/mysql/mysql-test
 package-contains-documentation-outside-usr-share-doc [usr/share/mysql/mysql-test/std_data/mariadb-conv/file01.utf8.txt]
 package-contains-documentation-outside-usr-share-doc [usr/share/mysql/mysql-test/std_data/mariadb-conv/file02.latin1.txt]
 package-contains-documentation-outside-usr-share-doc [usr/share/mysql/mysql-test/std_data/mysql5613mysql/README]
+package-contains-documentation-outside-usr-share-doc [usr/share/mysql/mysql-test/std_data/new-format-master.info]
 package-contains-documentation-outside-usr-share-doc [usr/share/mysql/mysql-test/std_data/new-format-relay-log-win.info]
 package-contains-documentation-outside-usr-share-doc [usr/share/mysql/mysql-test/std_data/new-format-relay-log.info]
 package-contains-documentation-outside-usr-share-doc [usr/share/mysql/mysql-test/std_data/numbers.txt]
