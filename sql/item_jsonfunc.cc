@@ -4030,8 +4030,7 @@ void Item_func_json_arrayagg::cut_max_length(String *result,
   if (result->length() == 0)
     return;
 
-  if (result->ptr()[result->length() - 1] != '"' ||
-      max_length == 0)
+  if (result->end()[-1] != '"' || old_length == max_length)
   {
     Item_func_group_concat::cut_max_length(result, old_length, max_length);
     return;
