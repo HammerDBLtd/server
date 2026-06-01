@@ -1,5 +1,6 @@
 --source include/have_ucs2.inc
 --source include/have_debug.inc
+--source include/have_innodb.inc
 
 let $MYSQLD_DATADIR= `select @@datadir`;
 
@@ -560,3 +561,12 @@ DROP TABLE t;
 --echo #
 --echo # End of 10.5 tests
 --echo #
+
+#
+# MDEV-36896 Assertion `marked_for_read()' failed in virtual String *Field_varstring::val_str(String *, String *)
+#
+
+SET tx_isolation='READ-UNCOMMITTED';
+CREATE TABLE t (a VARCHAR(10),b INT,c CHAR(10) GENERATED ALWAYS AS (a) VIRTUAL,KEY(b,c)) ENGINE=InnoDB;
+INSERT INTO t (a) VALUES ('A');
+SELECT * FROM t WHERE b IS NULL ORDER BY a;

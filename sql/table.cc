@@ -9187,7 +9187,6 @@ int TABLE::update_virtual_field(Field *vf, bool ignore_warnings)
           TABLE::update_virtual_fields(handler *, enum_vcol_update_mode).
   */
   in_use->set_n_backup_active_arena(expr_arena, &backup_arena);
-  bitmap_clear_all(&tmp_set);
   vf->vcol_info->expr->walk(&Item::update_vcol_processor, 0, &tmp_set);
   DBUG_FIX_WRITE_SET(vf);
   vf->vcol_info->expr->save_in_field(vf, 0);
