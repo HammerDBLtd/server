@@ -144,12 +144,23 @@ void QueryExecutor::setup_prebuilt(
   m_prebuilt->index_usable= 1;
   m_prebuilt->need_to_access_clustered= index->is_clust() ? 0 : 1;
   m_prebuilt->in_fts_query= true;
+  /* Treat every setup_prebuilt() as a fresh statement: force
+  row_search_mvcc to re-traverse the tree via search_tuple instead of
+  trying to resume from the stored pcur position left over from a
+  previous call. */
+  m_prebuilt->sql_stat_start= TRUE;
 }
 
 /* SQL equivalent:
      INSERT INTO <table> VALUES (<tuple>);
 Build a dtuple_t in caller-side memory and hand it straight to
-row_ins_clust_index_entry(), skipping the parser/graph entirely. */
+row_ins_clust_index_entry(), skipping the parser/graph entirely.
+
+row_ins_clust_index_entry() returns DB_LOCK_WAIT raw for tables with
+no foreign-key path (FTS aux/common/CONFIG): the leaf queues the
+waiter in trx->lock.wait_lock and returns without calling lock_wait.
+We must drain via handle_wait() before retrying; spinning on the goto
+would loop on the same unsatisfied wait. */
 dberr_t QueryExecutor::insert_record(dict_table_t *table,
                                      dtuple_t *tuple) noexcept
 {
@@ -160,7 +171,12 @@ dberr_t QueryExecutor::insert_record(dict_table_t *table,
 
 retry:
   err = row_ins_clust_index_entry(index, tuple, m_thr, 0);
-  if (err == DB_LOCK_WAIT) goto retry;
+  if (err == DB_LOCK_WAIT)
+  {
+    err= handle_wait(err, false);
+    if (err == DB_SUCCESS)
+      goto retry;
+  }
   ut_ad(err != DB_LOCK_WAIT);
   return err;
 }

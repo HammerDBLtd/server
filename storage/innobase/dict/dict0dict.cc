@@ -668,7 +668,8 @@ retry:
     else
     {
       *mdl= mdl_context->MDL_ACQUIRE_LOCK(MDL_key::TABLE, db_buf, tbl_buf,
-                                           MDL_SHARED, MDL_EXPLICIT,
+                                           exclusive ? MDL_EXCLUSIVE : MDL_SHARED,
+                                           MDL_EXPLICIT,
                                            static_cast<double>(
                                              global_system_variables
                                              .lock_wait_timeout));

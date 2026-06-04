@@ -420,10 +420,12 @@ dberr_t FTSQueryExecutor::update_config_record(
 
 /* SQL equivalent:
      DELETE FROM $FTS_<table_id>_INDEX_<aux_index> WHERE word = ?;
-Single-word delete from one auxiliary index. Build a 1-field
-dtuple containing just `word` and rely on the unique-key prefix
-match - INDEX_<n> tables have a unique (word, first_doc_id)
-PRIMARY KEY, so the partial key picks exactly the rows for this word. */
+Multi-row delete from one auxiliary index.  A single word can span
+several rows in INDEX_<n> because the unique key is
+(word, first_doc_id) and the ilist gets split at FTS_ILIST_MAX_SIZE
+boundaries.  QueryExecutor::delete_record() is single-row, so we
+loop until DB_RECORD_NOT_FOUND to match the old parser semantics of
+"DELETE WHERE word = ?". */
 dberr_t FTSQueryExecutor::delete_aux_record(
   uint8_t aux_index, const fts_aux_data_t *aux_data) noexcept
 {
@@ -453,7 +455,18 @@ dberr_t FTSQueryExecutor::delete_aux_record(
   dfield_t *field= dtuple_get_nth_field(&tuple, 0);
   dfield_set_data(field, aux_data->word, aux_data->word_len);
 
-  return m_executor.delete_record(table, &tuple);
+  for (;;)
+  {
+    err= m_executor.delete_record(table, &tuple);
+    if (err == DB_RECORD_NOT_FOUND)
+    {
+      err= DB_SUCCESS;
+      break;
+    }
+    if (err != DB_SUCCESS)
+      break;
+  }
+  return err;
 }
 
 /* SQL equivalent:
@@ -786,9 +799,7 @@ RecordCompareAction AuxRecordReader::compare_record(
     case AuxCompareMode::GREATER_EQUAL:
     case AuxCompareMode::GREATER:
     {
-      int match= 0;
-      cmp_result= cmp_dtuple_rec_bytes(rec, *index, *search_tuple, &match,
-                                       index->table->not_redundant());
+      cmp_result= cmp_dtuple_rec(search_tuple, rec, index, offsets);
       if (compare_mode == AuxCompareMode::GREATER_EQUAL)
         return (cmp_result <= 0) ? RecordCompareAction::PROCESS
                                  : RecordCompareAction::SKIP;

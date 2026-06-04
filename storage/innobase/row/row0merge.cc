@@ -1931,6 +1931,18 @@ row_merge_read_clustered_index(
 
 	const char*	path = thd_innodb_tmpdir(trx->mysql_thd);
 
+	clust_index = dict_table_get_first_index(old_table);
+	const ulint old_trx_id_col = ulint(old_table->n_cols)
+		- (DATA_N_SYS_COLS - DATA_TRX_ID);
+	ut_ad(old_table->cols[old_trx_id_col].mtype == DATA_SYS);
+	ut_ad(old_table->cols[old_trx_id_col].prtype
+	      == (DATA_TRX_ID | DATA_NOT_NULL));
+	ut_ad(old_table->cols[old_trx_id_col + 1].mtype == DATA_SYS);
+	ut_ad(old_table->cols[old_trx_id_col + 1].prtype
+	      == (DATA_ROLL_PTR | DATA_NOT_NULL));
+	const ulint new_trx_id_col = col_map
+		? col_map[old_trx_id_col] : old_trx_id_col;
+	uint64_t n_rows = 0;
 	ut_ad(!skip_pk_sort || dict_index_is_clust(index[0]));
 	/* There is no previous tuple yet. */
 	prev_mtuple.fields = NULL;
@@ -1952,7 +1964,7 @@ row_merge_read_clustered_index(
 			/* If Doc ID does not exist in the table itself,
 			fetch the first FTS Doc ID */
 			if (add_doc_id) {
-				fts_get_next_doc_id(
+				err = fts_get_next_doc_id(
 					(dict_table_t*) new_table,
 					&doc_id, trx->mysql_thd);
 				ut_ad(doc_id > 0);
@@ -1968,6 +1980,10 @@ row_merge_read_clustered_index(
 
 			merge_buf[i] = row_merge_buf_create(index[i]);
 		}
+	}
+
+	if (err) {
+		goto err_exit;
 	}
 
 	if (num_spatial > 0) {
@@ -1994,20 +2010,6 @@ row_merge_read_clustered_index(
 
 	/* Find the clustered index and create a persistent cursor
 	based on that. */
-
-	clust_index = dict_table_get_first_index(old_table);
-	const ulint old_trx_id_col = ulint(old_table->n_cols)
-		- (DATA_N_SYS_COLS - DATA_TRX_ID);
-	ut_ad(old_table->cols[old_trx_id_col].mtype == DATA_SYS);
-	ut_ad(old_table->cols[old_trx_id_col].prtype
-	      == (DATA_TRX_ID | DATA_NOT_NULL));
-	ut_ad(old_table->cols[old_trx_id_col + 1].mtype == DATA_SYS);
-	ut_ad(old_table->cols[old_trx_id_col + 1].prtype
-	      == (DATA_ROLL_PTR | DATA_NOT_NULL));
-	const ulint new_trx_id_col = col_map
-		? col_map[old_trx_id_col] : old_trx_id_col;
-	uint64_t n_rows = 0;
-
 	err = pcur.open_leaf(true, clust_index, BTR_SEARCH_LEAF, &mtr);
 	if (err != DB_SUCCESS) {
 err_exit:

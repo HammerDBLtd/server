@@ -113,16 +113,21 @@ m_mtr ownership rule:
 DB_LOCK_WAIT contract:
   No public QueryExecutor method ever returns DB_LOCK_WAIT.
   Internally there are two flavours of leaf:
-    - Self-draining leaves (row_ins_clust_index_entry,
-      row_search_mvcc) invoke lock_wait() inside their own error
-      path and surface either success or the post-wait failure
-      code (DB_LOCK_WAIT_TIMEOUT, DB_DEADLOCK, DB_INTERRUPTED).
-      Wrappers built on these (insert_record, select_for_update,
-      read*, delete_record, replace_record) just restart on a
+    - Self-draining leaves (row_search_mvcc - via
+      row_mysql_handle_errors which calls lock_wait()) surface
+      either success or the post-wait failure code
+      (DB_LOCK_WAIT_TIMEOUT, DB_DEADLOCK, DB_INTERRUPTED).
+      Wrappers built on these (select_for_update, read*,
+      delete_record, replace_record) just restart on a
       DB_LOCK_WAIT echo.
-    - Raw leaves (::lock_table, lock_clust_rec_read_check_and_lock)
-      return DB_LOCK_WAIT raw and require an explicit handle_wait()
-      drain (used by lock_table() and delete_all()).
+    - Raw leaves (::lock_table, lock_clust_rec_read_check_and_lock,
+      row_ins_clust_index_entry) return DB_LOCK_WAIT with
+      trx->lock.wait_lock still set, and require an explicit
+      handle_wait() drain before retrying.  Used by lock_table(),
+      delete_all() and insert_record().
+      (row_ins_clust_index_entry self-drains only when an FK check
+      triggers do_possible_lock_wait, which is not on the FTS aux
+      path.)
   Either way, callers see only DB_SUCCESS or a terminal error. */
 class QueryExecutor
 {

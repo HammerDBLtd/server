@@ -1591,7 +1591,11 @@ init_fts_doc_id_for_ref(
 
 		if (foreign->foreign_table->space
 		    && foreign->foreign_table->fts) {
-			fts_init_doc_id(foreign->foreign_table, thd);
+			doc_id_t ignored_doc_id;
+			/* Best-effort init for the referenced FTS table;
+			ignore failure so other FKs are still walked. */
+			(void) fts_init_doc_id(foreign->foreign_table,
+					       thd, &ignored_doc_id);
 		}
 
 		if (foreign->foreign_table != table

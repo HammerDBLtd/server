@@ -2371,7 +2371,12 @@ fts_get_next_doc_id(
 	will consult the CONFIG table and user table to re-establish
 	the initial value of the Doc ID */
 	if (cache->first_doc_id == FTS_NULL_DOC_ID) {
-		fts_init_doc_id(table, thd);
+		doc_id_t initial_doc_id = 0;
+		dberr_t err = fts_init_doc_id(table, thd, &initial_doc_id);
+		if (err != DB_SUCCESS) {
+			*doc_id = 0;
+			return err;
+		}
 	}
 
 	if (!DICT_TF2_FLAG_IS_SET(table, DICT_TF2_FTS_HAS_DOC_ID)) {
@@ -4129,35 +4134,50 @@ fts_get_docs_clear(
 }
 
 /*********************************************************************//**
-Get the initial Doc ID by consulting the CONFIG table
-@return initial Doc ID */
-doc_id_t
+Get the initial Doc ID by consulting the CONFIG table.
+On success, *doc_id holds the resolved id and the FTS cache's
+first_doc_id is initialized.  On failure (e.g. DB_INTERRUPTED when the
+caller's thread is killed mid CONFIG-table read), *doc_id is 0 and the
+cache is left uninitialized so a later attempt can retry.
+@return DB_SUCCESS or error code */
+dberr_t
 fts_init_doc_id(
 /*============*/
 	const dict_table_t*	table,		/*!< in: table */
-	THD*			thd)		/*!< in: caller's THD */
+	THD*			thd,		/*!< in: caller's THD */
+	doc_id_t*		doc_id)		/*!< out: initial Doc ID */
 {
-	doc_id_t	max_doc_id = 0;
+	*doc_id = 0;
 
 	mysql_mutex_lock(&table->fts->cache->lock);
 
 	/* Return if the table is already initialized for DOC ID */
 	if (table->fts->cache->first_doc_id != FTS_NULL_DOC_ID) {
 		mysql_mutex_unlock(&table->fts->cache->lock);
-		return(0);
+		return DB_SUCCESS;
 	}
 
 	DEBUG_SYNC_C("fts_initialize_doc_id");
 
 	/* Then compare this value with the ID value stored in the CONFIG
 	table. The larger one will be our new initial Doc ID */
+	doc_id_t	max_doc_id = 0;
 	trx_t* trx = trx_create();
 	trx->mysql_thd = thd;
 	trx_start_internal_read_only(trx);
 	FTSQueryExecutor executor(trx, table);
-	fts_cmp_set_sync_doc_id(&executor, table, 0, &max_doc_id);
+	dberr_t err = fts_cmp_set_sync_doc_id(&executor, table, 0,
+					      &max_doc_id);
 	fts_sql_commit(trx);
 	trx->free();
+
+	if (err != DB_SUCCESS) {
+		/* Leave the cache uninitialized (first_doc_id ==
+		FTS_NULL_DOC_ID) so a later attempt can retry; do NOT
+		set added_synced. */
+		mysql_mutex_unlock(&table->fts->cache->lock);
+		return err;
+	}
 
 	/* If DICT_TF2_FTS_ADD_DOC_ID is set, we are in the process of
 	creating index (and add doc id column. No need to recovery
@@ -4174,7 +4194,8 @@ fts_init_doc_id(
 
 	ut_ad(max_doc_id > 0);
 
-	return(max_doc_id);
+	*doc_id = max_doc_id;
+	return DB_SUCCESS;
 }
 
 /*********************************************************************//**

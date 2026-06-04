@@ -734,14 +734,20 @@ fts_index_get_charset(
 	dict_index_t*		index);		/*!< in: FTS index */
 
 /*********************************************************************//**
-Get the initial Doc ID by consulting the CONFIG table
-@return initial Doc ID */
-doc_id_t
+Get the initial Doc ID by consulting the CONFIG table.
+On success, the resolved id is stored in *doc_id and the FTS cache's
+first_doc_id is initialized.  On failure (e.g. DB_INTERRUPTED when the
+caller's thread is killed mid CONFIG-table read), *doc_id is set to 0
+and the cache is left uninitialized so a later attempt can retry.
+@return DB_SUCCESS or error code */
+dberr_t
 fts_init_doc_id(
 /*============*/
 	const dict_table_t*	table,	/*!< in: table */
-	THD*			thd);	/*!< in: caller's THD; may be NULL
+	THD*			thd,	/*!< in: caller's THD; may be NULL
 					if no connection THD is available */
+	doc_id_t*		doc_id);/*!< out: initial Doc ID, or 0 on
+					failure */
 
 /******************************************************************//**
 compare two character string according to their charset. */
