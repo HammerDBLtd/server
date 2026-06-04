@@ -738,7 +738,6 @@ private:
                       CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
         if (d == INVALID_HANDLE_VALUE)
         {
-        fail_and_close_s:
           CloseHandle(s);
           goto fail;
         }
