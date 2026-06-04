@@ -1839,6 +1839,9 @@ dberr_t recv_sys_t::find_checkpoint()
           continue;
         }
         size= filesize.QuadPart;
+#if 1 // FIXME
+        sql_print_information("found %s(%lx)", fn, entry.dwFileAttributes);
+#endif
         log_archive.emplace
           (lsn, archive_log{lsn - log_t::START_OFFSET + size,
                             log_t::log_access(entry.dwFileAttributes &
