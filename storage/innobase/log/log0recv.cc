@@ -1839,9 +1839,6 @@ dberr_t recv_sys_t::find_checkpoint()
           continue;
         }
         size= filesize.QuadPart;
-#if 1 // FIXME
-        sql_print_information("found %s(%lx)", fn, entry.dwFileAttributes);
-#endif
         log_archive.emplace
           (lsn, archive_log{lsn - log_t::START_OFFSET + size,
                             log_t::log_access(entry.dwFileAttributes &
@@ -3773,7 +3770,8 @@ bool log_t::archived_switch_recovery_prepare(lsn_t lsn) noexcept
   static_assert(int{READ_WRITE} == 0, "");
   static_assert(int{READ_ONLY} == 1, "");
   resize_log.m_file= os_file_create_func(fn, OS_FILE_OPEN, OS_LOG_FILE,
-                                         int{i->second.access} > 0, &success);
+                                         i->second.access > 0 || recv_sys.rpo,
+                                         &success);
   ut_ad(success == (resize_log.m_file != OS_FILE_CLOSED));
   if (resize_log.m_file == OS_FILE_CLOSED)
   {
