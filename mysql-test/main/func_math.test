@@ -2155,3 +2155,35 @@ SELECT SIGN(-'00');
 SELECT SIGN(-' 0 ');
 
 --echo # End of 13 tests
+
+--echo #
+--echo # MDEV-38210: Incorrect query result
+--echo #
+
+CREATE TABLE t1 (c1 LONGTEXT);
+INSERT INTO t1 VALUES ('03ksy'),('12abc'),('999'),('-7xy'),('abc'),(NULL);
+--sorted_result
+SELECT c1, MIN(LOWER(-(CAST(c1 AS BINARY)))) AS m FROM t1 GROUP BY c1;
+--sorted_result
+SELECT c1, -(CAST(c1 AS BINARY)) AS v FROM t1 GROUP BY c1;
+DROP TABLE t1;
+
+CREATE TABLE t1 (c1 LONGBLOB);
+INSERT INTO t1 VALUES ('03ksy'),('abc'),(NULL);
+--sorted_result
+SELECT c1, MIN(LOWER(-(CAST(c1 AS BINARY)))) AS m FROM t1 GROUP BY c1;
+DROP TABLE t1;
+
+# A bounded string type exercises the length plus one branch because its
+# argument width is below the double display length.  The plain selection
+# builds no temporary table, so it confirms the negated values independently
+# of the GROUP BY materialization the earlier sections cover.
+CREATE TABLE t1 (c1 VARCHAR(10));
+INSERT INTO t1 VALUES ('03ksy'),('12abc'),('999'),('-7xy'),('abc'),(NULL);
+--sorted_result
+SELECT c1, MIN(LOWER(-(CAST(c1 AS BINARY)))) AS m FROM t1 GROUP BY c1;
+--sorted_result
+SELECT -(CAST(c1 AS BINARY)) AS v FROM t1;
+DROP TABLE t1;
+
+--echo # End of 10.11 tests
