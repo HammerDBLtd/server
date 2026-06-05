@@ -207,6 +207,10 @@ public:
     part_column_list_val *list_col_array;
   };
 
+  /* TODO: change to pointer */
+  INTERVAL interval;
+  enum interval_type int_type;
+
   Vers_part_info *vers_info;
   
   /********************************************
@@ -319,7 +323,7 @@ public:
     restore_part_field_ptrs(NULL), restore_subpart_field_ptrs(NULL),
     part_expr(NULL), subpart_expr(NULL), item_free_list(NULL),
     bitmaps_are_initialized(FALSE),
-    list_array(NULL), vers_info(NULL), err_value(0),
+    list_array(NULL), int_type(INTERVAL_LAST), vers_info(NULL), err_value(0),
     part_info_string(NULL),
     curr_part_elem(NULL), current_partition(NULL),
     curr_list_object(0), num_columns(0), table(NULL),
@@ -348,6 +352,9 @@ public:
     temp_partitions.empty();
     part_field_list.empty();
     subpart_field_list.empty();
+    interval.second_part= interval.second= interval.minute=
+      interval.hour= interval.day= interval.month= interval.year= 0;
+    interval.neg= FALSE;
   }
   ~partition_info() = default;
 
@@ -417,11 +424,16 @@ public:
   bool field_in_partition_expr(Field *field) const;
 
   bool vers_init_info(THD *thd);
+  bool set_range_interval(THD* thd, Item* ival, interval_type type,
+                    const char *table_name);
+  bool set_range_interval(int num, LEX_CSTRING& type, bool is_ds,
+                    const char *table_name);
   bool vers_set_interval(THD *thd, Item *interval,
                          interval_type int_type, Item *starts,
                          bool auto_part, const char *table_name);
   bool vers_set_limit(ulonglong limit, bool auto_part, const char *table_name);
   bool vers_set_hist_part(THD* thd, uint *create_count);
+  bool range_interval_set_count(THD* thd, uint *create_count);
   bool vers_require_hist_part(THD *thd) const
   {
     return part_type == VERSIONING_PARTITION &&
@@ -430,6 +442,8 @@ public:
   void vers_check_limit(THD *thd);
   bool vers_fix_field_list(THD *thd);
   void vers_update_el_ids();
+  bool is_range_interval() const
+  { return int_type != INTERVAL_LAST && part_type == RANGE_PARTITION; }
   partition_element *get_partition(uint part_id)
   {
     List_iterator<partition_element> it(partitions);
@@ -452,6 +466,7 @@ void part_type_error(THD *thd, partition_info *work_part_info,
 uint32 get_next_partition_id_range(struct st_partition_iter* part_iter);
 bool check_partition_dirs(partition_info *part_info);
 bool vers_create_partitions(THD* thd, TABLE_LIST* tl, uint num_parts);
+bool range_interval_create_partitions(THD* thd, TABLE_LIST* tl, uint num_parts);
 
 /* Initialize the iterator to return a single partition with given part_id */
 
@@ -546,9 +561,59 @@ Lex_ident_partition make_partition_name(char *move_ptr, uint i)
 
 
 #ifdef WITH_PARTITION_STORAGE_ENGINE
+static int compare_int(const void *a, const void *b)
+{
+  if (*(int *) a < *(int *) b)
+    return -1;
+  if (*(int *) b < *(int *) a)
+    return 1;
+  return 0;
+}
+
+/*
+  Find the first index for naming range interval auto created
+  partitions. Find the first gap large enough to fit in all the new
+  partitions.
+*/
+static inline uint range_interval_next_part_no(
+  uint new_parts, List<partition_element>& partitions)
+{
+  int *cur, *start, *end;
+  List_iterator_fast<partition_element> it(partitions);
+  partition_element *el;
+  const char *name;
+  uint right= new_parts;
+  if(!(start= (int *) my_alloca(sizeof(int) * partitions.elements)))
+  {
+    /* Out of memory */
+    return 0;
+  }
+  cur= start;
+  while ((el= it++))
+  {
+    name= el->partition_name.str;
+    if (name[0] == 'p')
+    {
+      *cur= atoi(name + 1);
+      /* Ignore 0 which could be a failed conversion */
+      if (*cur > 0)
+        cur++;
+    }
+  }
+  end= cur;
+  my_qsort(start, end - start, sizeof(int), compare_int);
+  for (cur= start; cur < end && right >= (uint) *cur; cur++)
+    right= (uint) *cur + new_parts;
+  my_afree(start);
+  return right - new_parts + 1;
+}
+
 inline
 uint partition_info::next_part_no(uint new_parts) const
 {
+  if (is_range_interval())
+    return range_interval_next_part_no(new_parts,
+                                       table->part_info->partitions);
   if (part_type != VERSIONING_PARTITION)
     return num_parts;
   DBUG_ASSERT(new_parts > 0);
