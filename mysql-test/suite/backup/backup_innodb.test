@@ -7,8 +7,17 @@ ENGINE=INNODB;
 BEGIN;
 INSERT INTO t SET a=1;
 
-evalp BACKUP SERVER TO '$MYSQLTEST_VARDIR/some_directory';
---rmdir $MYSQLTEST_VARDIR/some_directory
+--let $target_directory=/tmp/some_directory$MTR_COMBINATION_ARCHIVED
+# comment out the following line (and some more, including rmdir),
+# to test cross-filesystem copy
+--let $target_directory=$MYSQLTEST_VARDIR/some_directory
+
+# Clean up after a previous failed test, in case we are retrying.
+--error 0,1
+--rmdir $target_directory
+
+evalp BACKUP SERVER TO '$target_directory';
+--rmdir $target_directory
 ROLLBACK;
 # BACKUP SERVER will implicitly commit the current transaction
 SELECT * FROM t;
@@ -19,31 +28,50 @@ DELETE FROM t;
 --connect backup,localhost,root
 if ($have_debug) {
 SET DEBUG_SYNC='innodb_backup_start SIGNAL start WAIT_FOR resume';
---replace_result $MYSQLTEST_VARDIR MYSQLTEST_VARDIR
-send_eval BACKUP SERVER TO '$MYSQLTEST_VARDIR/some_directory';
+--replace_result $target_directory target_directory
+send_eval BACKUP SERVER TO '$target_directory';
 --connection default
 SET DEBUG_SYNC='now WAIT_FOR start';
 INSERT INTO t(a) SELECT * FROM seq_1_to_30000;
 SET DEBUG_SYNC='now SIGNAL resume';
 --connection backup
+# FIXME: outside PMEM we may get ER_ERROR_ON_RENAME
 --reap
 }
 if (!$have_debug) {
---replace_result $MYSQLTEST_VARDIR MYSQLTEST_VARDIR
-eval BACKUP SERVER TO '$MYSQLTEST_VARDIR/some_directory';
+--replace_result $target_directory target_directory
+eval BACKUP SERVER TO '$target_directory';
 }
 
 --disconnect backup
 --connection default
 ROLLBACK;
 SELECT * FROM t;
+DELETE FROM t;
 
-let $datadir=`SELECT @@datadir`;
---source include/shutdown_mysqld.inc
-#--rmdir $datadir
-#--move_file $MYSQLTEST_VARDIR/some_directory $datadir
---rmdir $MYSQLTEST_VARDIR/some_directory
---source include/start_mysqld.inc
+if ($MARIADB_UPGRADE_EXE) {
+let target_directory=$target_directory;
+perl;
+open IN, "<", "$ENV{MYSQLTEST_VARDIR}/my.cnf";
+open OUT, ">>", "$ENV{target_directory}/backup.cnf";
+print OUT while (<IN>);
+close(IN);
+close(OUT);
+EOF
+}
+if (!$MARIADB_UPGRADE_EXE) {
+  --exec cat $MYSQLTEST_VARDIR/my.cnf >> $target_directory/backup.cnf
+}
+--let $restart_parameters=--defaults-file=$target_directory/backup.cnf --datadir=$target_directory
+--source include/restart_mysqld.inc
 
 SELECT * FROM t;
+# we must have started up with nonzero innodb_log_recovery_target
+--error ER_OPEN_AS_READONLY
+DELETE FROM t;
+--let $restart_parameters=
+--source include/restart_mysqld.inc
+SELECT * FROM t;
 DROP TABLE t;
+
+--rmdir $target_directory

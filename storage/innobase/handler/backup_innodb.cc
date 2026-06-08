@@ -594,7 +594,7 @@ private:
   @param c         offset of the FILE_CHECKPOINT mini-transaction
   @return error code
   @retval 0 on success */
-  static int write_checkpoint(int dst, uint64_t c) noexcept
+  static int write_checkpoint(IF_WIN(HANDLE,int) dst, uint64_t c) noexcept
   {
 #ifdef _WIN32
     using tpool::pwrite;
