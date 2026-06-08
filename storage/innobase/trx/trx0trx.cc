@@ -1660,6 +1660,7 @@ trx_commit_or_rollback_prepare(
 
 	case TRX_STATE_COMMITTED_IN_MEMORY:
 	case TRX_STATE_ABORTED:
+	case TRX_STATE_BACKUP:
 		break;
 	}
 
@@ -1744,6 +1745,7 @@ void trx_commit_for_mysql(trx_t *trx) noexcept
     trx->op_info= "";
     break;
   case TRX_STATE_COMMITTED_IN_MEMORY:
+  case TRX_STATE_BACKUP:
     ut_error;
     break;
   }
@@ -1812,6 +1814,9 @@ trx_print_low(
 		goto state_ok;
 	case TRX_STATE_COMMITTED_IN_MEMORY:
 		fputs(", COMMITTED IN MEMORY", f);
+		goto state_ok;
+        case TRX_STATE_BACKUP:
+		fputs(", BACKUP SERVER", f);
 		goto state_ok;
 	}
 	fprintf(f, ", state %lu", (ulong) trx->state);
@@ -2172,6 +2177,7 @@ trx_start_if_not_started_xa_low(
 	case TRX_STATE_PREPARED:
 	case TRX_STATE_PREPARED_RECOVERED:
 	case TRX_STATE_COMMITTED_IN_MEMORY:
+	case TRX_STATE_BACKUP:
 		break;
 	}
 
@@ -2201,6 +2207,7 @@ trx_start_if_not_started_low(
 	case TRX_STATE_PREPARED:
 	case TRX_STATE_PREPARED_RECOVERED:
 	case TRX_STATE_COMMITTED_IN_MEMORY:
+	case TRX_STATE_BACKUP:
 		break;
 	}
 

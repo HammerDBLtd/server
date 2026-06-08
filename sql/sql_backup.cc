@@ -1,0 +1,373 @@
+/* Copyright (c) 2026, MariaDB plc
+
+   This program is free software; you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation; version 2 of the License.
+
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
+
+   You should have received a copy of the GNU General Public License
+   along with this program; if not, write to the Free Software
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
+
+#include "my_global.h"
+#include "mdl.h"
+#include "mysys_err.h"
+#include "sql_class.h"
+#include "sql_backup.h"
+#include "sql_backup_interface.h"
+#include "sql_parse.h"
+#ifdef _WIN32
+# include "aligned.h"
+# include "tpool.h"
+#endif
+
+#if defined __linux__ || defined __FreeBSD__
+using copying_step= ssize_t(int,int,size_t,off_t*);
+template<copying_step step>
+static ssize_t copy(int in_fd, int out_fd, off_t offset, off_t end) noexcept
+{
+  for (;;)
+  {
+    const size_t c{size_t(std::min<off_t>(end - offset, INT_MAX >> 20 << 20))};
+    ssize_t ret= step(in_fd, out_fd, c, &offset);
+    if (ret < 0)
+      return ret;
+    if (offset == end)
+      return 0;
+    if (!ret)
+      return -1;
+  }
+}
+
+/* Copy between files in a single (type of) file system */
+static inline ssize_t
+copy_step(int in_fd, int out_fd, size_t count, off_t *offset) noexcept
+{
+  return copy_file_range(in_fd, offset, out_fd, offset, count, 0);
+}
+# define cfr(src,dst,start,end) copy<copy_step>(src, dst, start, end)
+#endif
+#ifdef __linux__
+# include <sys/sendfile.h>
+/* Copy a file to a stream or to a regular file. */
+static inline ssize_t
+send_step(int in_fd, int out_fd, size_t count, off_t *offset) noexcept
+{
+  return sendfile(out_fd, in_fd, offset, count);
+}
+#else
+# ifndef _WIN32
+#  include "aligned.h"
+#  include <sys/mman.h>
+/** Copy a file using a memory mapping.
+@param in_fd   source file
+@param out_fd  destination
+@param o       start offset
+@param end     last offset (exclusive)
+@return error code
+@retval 0  on success
+@retval 1  if a memory mapping failed */
+static ssize_t mmap_copy(int in_fd, int out_fd, uint64_t o, uint64_t end)
+{
+#if SIZEOF_SIZE_T < 8
+  if (end != ssize_t(end))
+    return 1;
+#endif
+  const size_t count= size_t(end - o);
+  void *p= mmap(nullptr, count, PROT_READ, MAP_SHARED, in_fd, off_t(o));
+  if (p == MAP_FAILED)
+    return 1;
+  ssize_t ret;
+  size_t c{count};
+  for (const char *b= static_cast<const char*>(p);; b+= ret, o+= uint64_t(ret))
+  {
+    ret= pwrite(out_fd, b, std::min(c, size_t(INT_MAX >> 20 << 20)), off_t(o));
+    if (ret < 0)
+      break;
+    c-= ret;
+    if (!c)
+    {
+      ret= 0;
+      break;
+    }
+    if (!ret)
+    {
+      ret= -1;
+      break;
+    }
+  }
+  munmap(p, c);
+  return ret;
+}
+# endif
+
+/** Copy a file using positioned reads and writes.
+@param in_fd   source file
+@param out_fd  destination
+@param o       start offset
+@param end     last offset (exclusive)
+@return error code
+@retval 0  on success
+@retval 1  if a memory mapping failed */
+static ssize_t pread_pwrite(IF_WIN(const native_file_handle&,int) in_fd,
+                            IF_WIN(const native_file_handle&,int) out_fd,
+                            uint64_t o, uint64_t end)
+  noexcept
+{
+#ifdef _WIN32
+  using tpool::pread;
+  using tpool::pwrite;
+#endif
+  constexpr size_t READ_WRITE_SIZE= 65536;
+  char *b= static_cast<char*>(aligned_malloc(READ_WRITE_SIZE, 4096));
+  if (!b)
+    return -1;
+  ssize_t ret;
+  for (uint64_t count{end - o};; o+= ret)
+  {
+    ret= pread(in_fd, b,
+               ssize_t(std::min<uint64_t>(count, READ_WRITE_SIZE)), o);
+    if (ret > 0)
+      ret= pwrite(out_fd, b, ret, o);
+    if (ret < 0)
+      break;
+    count-= uint64_t(ret);
+    if (!count)
+    {
+      ret= 0;
+      break;
+    }
+    if (!ret)
+    {
+      ret= -1;
+      break;
+    }
+  }
+  aligned_free(b);
+  return ret;
+}
+#endif
+
+#ifdef __APPLE__
+/* The inline copy_entire_file() invokes fcopyfile() */
+#elif defined _WIN32
+/* CopyFileEx() should be used */
+#else
+/** Copy a file (whole content).
+@param src  source file descriptor
+@param dst  target to append src to
+@return error code (non-positive)
+@retval 0   on success */
+extern "C" int copy_entire_file(int src, int dst)
+{
+  return copy_file(src, dst, 0, lseek(src, 0, SEEK_END));
+}
+#endif
+
+/** Copy a portion of a file.
+@param src   source file descriptor
+@param dst   target to append src to
+@param start first offset to copy
+@param end   last offset to copy (exclusive)
+@return error code (non-positive)
+@retval 0   on success */
+extern "C" int copy_file(IF_WIN(const native_file_handle&,int) src,
+                         IF_WIN(const native_file_handle&,int) dst,
+                         uint64_t start, uint64_t end)
+{
+  assert(end >= start);
+  ssize_t ret;
+# ifdef cfr
+  if (!(ret= cfr(src, dst, off_t(start), off_t(end))))
+    return int(ret);
+#  ifdef __linux__
+  if (errno == EOPNOTSUPP || errno == EXDEV)
+#  endif
+# endif
+# ifdef __linux__ // starting with Linux 2.6.33, we can rely on sendfile(2)
+    ret= (start != 0 && off_t(start) != lseek(dst, start, SEEK_SET))
+      ? -1
+      : copy<send_step>(src, dst, off_t(start), off_t(end));
+# else
+#  ifndef _WIN32
+  if ((ret= mmap_copy(src, dst, start, end)) == 1)
+#  endif
+    ret= pread_pwrite(src, dst, start, end);
+# endif
+  assert(ret <= 0);
+  return int(ret);
+}
+
+/** Append to the configuration file.
+@param target   backup target
+@param config   the configuration file snippet to append
+@param size     length of the snippet
+@return error code (non-positive)
+@retval 0   on success */
+extern "C" int backup_config_append(const backup_target &target,
+                                    const char *config, size_t size)
+{
+  /* FIXME: append to a pre-created configuration file */
+#ifdef _WIN32
+  HANDLE dst;
+  {
+    std::string path{target.path};
+    path.append("/backup.cnf");
+    dst= CreateFile(path.c_str(), GENERIC_WRITE, 0,
+                    my_win_file_secattr(), CREATE_NEW,
+                    FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (dst != INVALID_HANDLE_VALUE)
+    {
+      BOOL ok;
+      for (;;)
+      {
+        DWORD written;
+        ok= WriteFile(dst, config, DWORD(size), &written, nullptr);
+        if (ok || !written || GetLastError() != ERROR_IO_PENDING)
+          break;
+        assert(written < DWORD(size));
+        config+= written;
+        size-= size_t(written);
+      }
+      if (CloseHandle(dst) & ok)
+        return 0;
+    }
+  }
+#else
+  assert(target.directory);
+  int dst= openat(target.fd, "backup.cnf",
+                  O_CREAT | O_EXCL | O_TRUNC | O_WRONLY, 0666);
+  if (dst < 0)
+    return dst;
+  ssize_t ret;
+  for (; (ret= write(dst, config, size)) >= 0; config+= ret, size -= ret)
+  {
+    assert(size_t(ret) <= size);
+    if (!(size-= size_t(ret)))
+    {
+      ret= 0;
+      break;
+    }
+  }
+  if (!(close(dst) | ret))
+    return 0;
+#endif
+  my_error(ER_CANT_CREATE_FILE, MYF(0), "backup.cnf", errno);
+  return -1;
+}
+
+static my_bool backup_start(THD *thd, plugin_ref plugin, void *dst) noexcept
+{
+  handlerton *hton= plugin_hton(plugin);
+  if (hton->backup_start)
+    return hton->backup_start(thd, *static_cast<backup_target*>(dst));
+  return false;
+}
+
+static my_bool backup_end(THD *thd, plugin_ref plugin, void *arg) noexcept
+{
+  handlerton *hton= plugin_hton(plugin);
+  if (hton->backup_end)
+    return hton->backup_end(thd, arg != nullptr);
+  return false;
+}
+
+static my_bool backup_step(THD *thd, plugin_ref plugin, void *) noexcept
+{
+  handlerton *hton= plugin_hton(plugin);
+  int res= 0;
+  if (hton->backup_step)
+    while ((res= hton->backup_step(thd)))
+      if (res < 0)
+        break;
+  return res != 0;
+}
+
+static my_bool backup_finalize(THD *thd, plugin_ref plugin, void *dst) noexcept
+{
+  handlerton *hton= plugin_hton(plugin);
+  if (hton->backup_finalize)
+    return hton->backup_finalize(thd, *static_cast<backup_target*>(dst));
+  return 0;
+}
+
+bool Sql_cmd_backup::execute(THD *thd)
+{
+  if (check_global_access(thd, RELOAD_ACL) ||
+      check_global_access(thd, SELECT_ACL) ||
+      error_if_data_home_dir(target.str, "BACKUP SERVER TO"))
+    return true;
+
+  if (thd->current_backup_stage != BACKUP_FINISHED)
+  {
+    my_error(ER_BACKUP_LOCK_IS_ACTIVE, MYF(0));
+    return true;
+  }
+
+  /* Block concurrent BACKUP SERVER and BACKUP STAGE */
+  MDL_request mdl_request;
+  MDL_REQUEST_INIT(&mdl_request, MDL_key::BACKUP, "", "", MDL_BACKUP_START,
+                   MDL_EXPLICIT);
+
+  if (thd->mdl_context.acquire_lock(&mdl_request,
+                                    thd->variables.lock_wait_timeout))
+    return true;
+
+  if (my_mkdir(target.str, 0755, MYF(MY_WME)))
+  {
+#ifndef _WIN32
+  err_exit:
+#endif
+    thd->mdl_context.release_lock(mdl_request.ticket);
+    return true;
+  }
+
+#ifdef _WIN32
+  backup_target dir{target.str, INVALID_HANDLE_VALUE};
+#else
+  backup_target dir{open(target.str, O_DIRECTORY), true};
+  if (dir.fd < 0)
+  {
+    my_error(EE_CANT_MKDIR, MYF(ME_BELL), target.str, errno);
+    goto err_exit;
+  }
+#endif
+
+  bool fail= plugin_foreach_with_mask(thd, backup_start,
+                                      MYSQL_STORAGE_ENGINE_PLUGIN,
+                                      PLUGIN_IS_DELETED|PLUGIN_IS_READY, &dir);
+
+  /* The backup_step may be invoked in multiple concurrent threads.
+  At the time backup_end is invoked, all backup_step will have to complete. */
+  if (!fail)
+    fail= plugin_foreach_with_mask(thd, backup_step,
+                                   MYSQL_STORAGE_ENGINE_PLUGIN,
+                                   PLUGIN_IS_DELETED|PLUGIN_IS_READY, nullptr);
+
+  fail=
+    thd->mdl_context.upgrade_shared_lock(mdl_request.ticket,
+                                         MDL_BACKUP_WAIT_COMMIT,
+                                         thd->variables.lock_wait_timeout) ||
+    plugin_foreach_with_mask(thd, backup_end, MYSQL_STORAGE_ENGINE_PLUGIN,
+                             PLUGIN_IS_DELETED|PLUGIN_IS_READY,
+                             reinterpret_cast<void*>(fail)) || fail;
+
+  /* The final part must not interfere with the use of the server datadir.
+  Release the locks. */
+  thd->mdl_context.release_lock(mdl_request.ticket);
+  fail= plugin_foreach_with_mask(thd, backup_finalize,
+                                 MYSQL_STORAGE_ENGINE_PLUGIN,
+                                 PLUGIN_IS_DELETED|PLUGIN_IS_READY, &dir) ||
+    fail;
+#ifndef _WIN32
+  close(dir.fd);
+#endif
+
+  if (!fail)
+    my_ok(thd);
+  return fail;
+}

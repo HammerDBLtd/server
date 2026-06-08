@@ -348,10 +348,14 @@ struct trx_lock_t
 					only be modified by the thread that is
 					serving the running transaction. */
 
-  /** Pre-allocated record locks */
-  struct {
-    alignas(CPU_LEVEL1_DCACHE_LINESIZE) ib_lock_t lock;
-  } rec_pool[8];
+  union
+  {
+    /** Context for finalizing BACKUP SERVER */
+    backup_context backup;
+
+    /** Pre-allocated record locks */
+    struct { alignas(CPU_LEVEL1_DCACHE_LINESIZE) ib_lock_t lock; } rec_pool[8];
+  };
 
   /** Pre-allocated table locks */
   ib_lock_t table_pool[8];

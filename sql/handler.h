@@ -1496,6 +1496,27 @@ struct transaction_participant
   ulonglong (*prepare_commit_versioned)(THD *thd, ulonglong *trx_id);
 };
 
+/** BACKUP SERVER target */
+struct backup_target
+{
+#ifdef _WIN32
+  /** Target directory path name */
+  const char *path;
+  union
+  {
+    /** Target pipe, if path==reinterpret_cast<const char*>(-1) */
+    HANDLE pipe;
+    /** Target socket, if path==nullptr */
+    SOCKET socket;
+  };
+#else
+  /** Target file descriptor */
+  int fd;
+  /** whether the fd is a directory handle */
+  bool directory;
+#endif
+};
+
 /*
   handlerton is a singleton structure - one instance per storage engine -
   to provide access to storage engine functionality that works on the
@@ -1892,8 +1913,43 @@ struct handlerton : public transaction_participant
   /*********************************************************************
     backup
   **********************************************************************/
+
+  /** BACKUP STAGE START */
   void (*prepare_for_backup)(void);
+  /** BACKUP STAGE END */
   void (*end_backup)(void);
+
+  /**
+     Start of BACKUP SERVER: collect all files to be backed up
+     @param thd     current session
+     @param target  backup target
+     @return error code
+     @retval 0 on success
+  */
+  int (*backup_start)(THD *thd, backup_target target);
+  /**
+     Process a file that was collected in backup_start().
+     @param thd   current session
+     @return number of files remaining, or negative on error
+     @retval 0 on completion
+  */
+  int (*backup_step)(THD *thd);
+  /**
+     Finish copying and determine the logical time of the backup snapshot.
+     @param thd   current sesssion
+     @param abort whether BACKUP SERVER was aborted
+     @return error code
+     @retval 0 on success
+  */
+  int (*backup_end)(THD *thd, bool abort);
+  /**
+     Clean up after any backup_end().
+     @param thd     the parameter on which backup_end() was invoked
+     @param target  backup target
+     @return error code
+     @retval 0 on success
+  */
+  int (*backup_finalize)(THD *thd, backup_target target);
 
   /**********************************************************************
    WSREP specific

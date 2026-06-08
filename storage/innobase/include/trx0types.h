@@ -62,7 +62,28 @@ enum trx_state_t {
 	/** XA PREPARE transaction that was returned to ha_recover() */
 	TRX_STATE_PREPARED_RECOVERED,
         /** The transaction has been committed (or completely rolled back) */
-	TRX_STATE_COMMITTED_IN_MEMORY
+	TRX_STATE_COMMITTED_IN_MEMORY,
+	/** The transaction holds context for BACKUP SERVER */
+	TRX_STATE_BACKUP
+};
+
+/** TRX_STATE_BACKUP context */
+struct backup_context
+{
+  /** Start LSN of the first backed up log file */
+  lsn_t first_lsn;
+  /** Start LSN of the latest copied log file, or 1 if none yet */
+  lsn_t max_first_lsn;
+  /** size of the first log file */
+  uint64_t first_size;
+  /** Checkpoint at the start of the backup */
+  lsn_t checkpoint;
+  /** Log record pointing to the checkpoint */
+  lsn_t checkpoint_end_lsn;
+  /** Final LSN of the backup */
+  lsn_t last_lsn;
+  /** the original state of innodb_log_archive before/after backup */
+  bool archived;
 };
 
 /** Transaction bulk insert operation @see trx_t::bulk_insert */
