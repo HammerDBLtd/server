@@ -6794,7 +6794,8 @@ check_access(THD *thd, privilege_t want_access,
     belongs to the bit set of .
   */
   bool need_table_or_column_check=
-      (want_access & (TABLE_ACLS | PROC_ACLS | db_access.allow_bits())) == want_access;
+      (want_access & (TABLE_ACLS | PROC_ACLS |
+                      db_access.maybe_allowed(want_access))) == want_access;
 
   /*
     Grant access if the requested access is in the intersection of
