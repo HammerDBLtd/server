@@ -175,8 +175,8 @@ extern "C" int copy_entire_file(int src, int dst)
 @param end   last offset to copy (exclusive)
 @return error code (non-positive)
 @retval 0   on success */
-extern "C" int copy_file(IF_WIN(const native_file_handle&,int) src,
-                         IF_WIN(const native_file_handle&,int) dst,
+extern "C" int copy_file(IF_WIN(const native_file_handle*,int) src,
+                         IF_WIN(const native_file_handle*,int) dst,
                          uint64_t start, uint64_t end)
 {
   assert(end >= start);
@@ -192,10 +192,10 @@ extern "C" int copy_file(IF_WIN(const native_file_handle&,int) src,
     ret= (start != 0 && off_t(start) != lseek(dst, start, SEEK_SET))
       ? -1
       : copy<send_step>(src, dst, off_t(start), off_t(end));
+# elif defined _WIN32
+  ret= pread_pwrite(*src, *dst, start, end);
 # else
-#  ifndef _WIN32
   if ((ret= mmap_copy(src, dst, start, end)) == 1)
-#  endif
     ret= pread_pwrite(src, dst, start, end);
 # endif
   assert(ret <= 0);
