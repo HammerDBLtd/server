@@ -2440,6 +2440,7 @@ public:
   }
   virtual bool check_handler_func_processor(void *arg) { return 0; }
   virtual bool check_field_expression_processor(void *arg) { return 0; }
+  virtual bool check_field_ref_processor(void *arg) { return 0; }
   virtual bool check_func_default_processor(void *arg) { return 0; }
   virtual bool update_func_default_processor(void *arg) { return 0; }
   /*
@@ -3894,6 +3895,7 @@ public:
                                          cond_equal_ref);
   }
   bool is_result_field() override { return false; }
+  bool check_field_ref_processor(void *arg) override { return true; }
   void save_in_result_field(bool no_conversions) override;
   Item *get_tmp_table_item(THD *thd) override;
   bool find_not_null_fields(table_map allowed) override;

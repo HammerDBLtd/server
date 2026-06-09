@@ -1,5 +1,6 @@
 --source include/have_ucs2.inc
 --source include/have_debug.inc
+--source include/have_innodb.inc
 
 let $MYSQLD_DATADIR= `select @@datadir`;
 
@@ -560,3 +561,16 @@ DROP TABLE t;
 --echo #
 --echo # End of 10.5 tests
 --echo #
+
+#
+# MDEV-36896 Assertion `marked_for_read()' failed in virtual String *Field_varstring::val_str(String *, String *)
+#
+SET GLOBAL mysql56_temporal_format=0;
+SET explicit_defaults_for_timestamp=0;
+CREATE TABLE t (b TIMESTAMP,a INT AS (1 IN (DAYOFMONTH (b between''AND current_user)=b)));
+--error ER_NO_SUCH_TABLE
+SELECT * FROM t,t2;
+SELECT * FROM t;
+
+# Cleanup
+DROP TABLE t;
