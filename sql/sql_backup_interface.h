@@ -54,8 +54,8 @@ extern "C"
 @param end   last offset to copy (exclusive)
 @return error code (non-positive)
 @retval 0   on success */
-int copy_file(IF_WIN(const native_file_handle*,int) src,
-              IF_WIN(const native_file_handle*,int) dst,
+int copy_file(IF_WIN(const native_file_handle&,int) src,
+              IF_WIN(const native_file_handle&,int) dst,
               uint64_t start, uint64_t end);
 
 #ifdef __cplusplus

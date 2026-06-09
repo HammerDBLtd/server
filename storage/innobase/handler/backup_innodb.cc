@@ -393,7 +393,7 @@ public:
               !SetEndOfFile(d);
           }
           if (!fail)
-            fail= copy_file(&s, &d, log_sys.START_OFFSET, payload_end) ||
+            fail= copy_file(s, d, log_sys.START_OFFSET, payload_end) ||
               (ctx.max_first_lsn == ctx.first_lsn &&
                write_checkpoint(d, ctx.checkpoint_end_lsn - ctx.first_lsn +
                                 log_sys.START_OFFSET));
@@ -581,8 +581,7 @@ private:
         const uint32_t end{start + fil_space_t::BACKUP_BATCH_SIZE};
         backup_start(node->space, end);
         /* TODO: avoid copying freed page ranges */
-        err= copy_file(IF_WIN(&,)node->handle, IF_WIN(&,)f,
-                       start * uint64_t{page_size},
+        err= copy_file(node->handle, f, start * uint64_t{page_size},
                        std::min(end, file_size) * uint64_t{page_size});
         backup_stop(node->space);
         if (err || (start= end) >= file_size)
@@ -775,7 +774,7 @@ private:
 
         if (!err)
         {
-          err= copy_file(&s, &d, payload_start, payload_end);
+          err= copy_file(s, d, payload_start, payload_end);
           if (!err && lsn < ctx.checkpoint)
             err= write_checkpoint(d, ctx.checkpoint_end_lsn - lsn +
                                   log_sys.START_OFFSET);
