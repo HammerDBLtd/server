@@ -334,6 +334,7 @@ public:
       if (ctx.max_first_lsn)
       {
         /* Copy our clone of the last log until the final LSN */
+        ut_ad(target.stream == target.NO_STREAM);
 #ifdef _WIN32
         std::string src{target.path};
         src.push_back('/');
@@ -401,7 +402,6 @@ public:
           }
         }
 #else
-        ut_ad(target.directory);
         int s= openat(target.fd, "ib_logfile101", O_RDONLY);
         std::string dst;
         log_sys.append_archive_name(dst, ctx.max_first_lsn);
@@ -413,7 +413,6 @@ public:
           fail= 1;
           goto done;
         }
-        ut_ad(target.directory);
         d= openat(target.fd, dst.c_str(),
                   O_CREAT | O_EXCL | O_TRUNC | O_WRONLY, 0666);
         if (d < 0)
@@ -495,6 +494,7 @@ private:
   {
     for (bool tried_mkdir{false};;)
     {
+      ut_ad(target.stream == target.NO_STREAM);
 #ifdef _WIN32
       std::string path{target.path};
       path.push_back('/');
@@ -522,7 +522,6 @@ private:
       }
 #else
       int f;
-      ut_ad(target.directory);
 # ifdef __APPLE__
       backup_start(node->space,
                    (node->space->size + fil_space_t::BACKUP_BATCH_SIZE - 1) &
@@ -657,7 +656,6 @@ private:
     else
       basename++;
     const bool move{!clone && !ctx.archived};
-
 #ifdef _WIN32
     std::string b{target.path};
     b.push_back('/');
@@ -779,7 +777,6 @@ private:
     else if (clone)
       *clone= true;
 #else
-    ut_ad(target.directory);
     if (move
         ? !renameat(AT_FDCWD, path, target.fd, basename)
         : !linkat(AT_FDCWD, path, target.fd,

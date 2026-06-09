@@ -238,7 +238,7 @@ extern "C" int backup_config_append(const backup_target &target,
     }
   }
 #else
-  assert(target.directory);
+  assert(target.stream == target.NO_STREAM);
   int dst= openat(target.fd, "backup.cnf",
                   O_CREAT | O_EXCL | O_TRUNC | O_WRONLY, 0666);
   if (dst < 0)
@@ -327,9 +327,9 @@ bool Sql_cmd_backup::execute(THD *thd)
   }
 
 #ifdef _WIN32
-  backup_target dir{target.str, INVALID_HANDLE_VALUE};
+  backup_target dir{target.str};
 #else
-  backup_target dir{open(target.str, O_DIRECTORY), true};
+  backup_target dir{open(target.str, O_DIRECTORY)};
   if (dir.fd < 0)
   {
     my_error(EE_CANT_MKDIR, MYF(ME_BELL), target.str, errno);

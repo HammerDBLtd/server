@@ -1500,21 +1500,18 @@ struct transaction_participant
 struct backup_target
 {
 #ifdef _WIN32
-  /** Target directory path name */
+  /** Target or spare directory path name */
   const char *path;
-  union
-  {
-    /** Target pipe, if path==reinterpret_cast<const char*>(-1) */
-    HANDLE pipe;
-    /** Target socket, if path==nullptr */
-    SOCKET socket;
-  };
+  /** A value indicating an invalid stream */
+  static constexpr HANDLE NO_STREAM{INVALID_HANDLE_VALUE};
 #else
-  /** Target file descriptor */
+  /** Target or spare directory descriptor */
   int fd;
-  /** whether the fd is a directory handle */
-  bool directory;
+  /** A value indicating an invalid stream */
+  static constexpr int NO_STREAM{-1};
 #endif
+  /** Target pipe, or NO_STREAM if copying to the target directory */
+  static constexpr IF_WIN(HANDLE,int) stream{NO_STREAM};
 };
 
 /*
