@@ -15,7 +15,6 @@
 
 #include "maria_def.h"
 #include "ma_backup.h"
-#include "sql_backup_interface.h"
 #include "mysqld_error.h"
 #if 1 // tc_purge(), tdc_purge()
 # include "sql_class.h"
