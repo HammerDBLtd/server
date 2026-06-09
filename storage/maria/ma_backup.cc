@@ -15,17 +15,16 @@
 
 #include "maria_def.h"
 #include "ma_backup.h"
-#include <mysqld_error.h>
+#include "sql_backup_interface.h"
+#include "mysqld_error.h"
+#if 1 // tc_purge(), tdc_purge()
+# include "sql_class.h"
+# include "table_cache.h"
+#endif
 #include <memory>
 #include <string>
 #include <utility>
 #include <vector>
-
-#ifdef __APPLE__
-#include <sys/attr.h>
-#include <sys/clonefile.h>
-#include <copyfile.h>
-#endif
 
 /*
   Implementation of functions declatred in ma_backup.h:
@@ -107,14 +106,15 @@ namespace
 #endif // _WIN32
     }
 
-    int end(THD *thd, bool abort) noexcept
+    int end(THD *thd, backup_phase phase) noexcept
     {
       int ret_val = 0;
-      if (!abort) {
-        if (int err= perform_backup() != 0)
-        {
-          ret_val= err;
-        };
+      if (phase == BACKUP_PHASE_NO_COMMIT) {
+#if 1 // FIXME: invoke these only for Aria, MyISAM, CSV but not InnoDB, RocksDB
+        tc_purge();
+        tdc_purge(true);
+#endif
+        ret_val= perform_backup();
       }
       translog_enable_purge();
       return ret_val;
@@ -343,20 +343,22 @@ namespace
   std::unique_ptr<Aria_backup> aria_backup;
 }
 
-int aria_backup_start(THD *thd, backup_target target) noexcept
+int aria_backup_start(THD *thd, const backup_target &target, backup_phase)
+  noexcept
 {
   aria_backup= std::make_unique<Aria_backup>(thd, target);
   return !aria_backup->is_initialized();
 }
 
-int aria_backup_step(THD *thd) noexcept
+int aria_backup_step(THD *, const backup_target &, backup_phase) noexcept
 {
   return 0;
 }
 
-int aria_backup_end(THD *thd, bool abort) noexcept
+int aria_backup_end(THD *thd, const backup_target &,
+                    backup_phase phase) noexcept
 {
-  int ret_val= aria_backup->end(thd, abort);
+  int ret_val= aria_backup->end(thd, phase);
   aria_backup.reset();
   return ret_val;
 }

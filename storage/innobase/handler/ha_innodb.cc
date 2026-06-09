@@ -4146,7 +4146,6 @@ static int innodb_init(void* p)
 	innobase_hton->backup_start = innodb_backup_start;
 	innobase_hton->backup_step = innodb_backup_step;
 	innobase_hton->backup_end = innodb_backup_end;
-	innobase_hton->backup_finalize = innodb_backup_finalize;
         innobase_hton->binlog_init= innodb_binlog_init;
         innobase_hton->set_binlog_max_size= ibb_set_max_size;
         innobase_hton->binlog_write_direct_ordered=

@@ -21,27 +21,35 @@
 #include <handler.h>
 
 /**
-   Start of BACKUP SERVER: collect all files to be backed up
+   Start of a BACKUP SERVER phase,
+   when no aria_backup_step() or aria_backup_end() is pending.
    @param thd     current session
-   @param target  target directory
+   @param target  backup target
+   @param phase   BACKUP_PHASE_START, ...
    @return error code
    @retval 0 on success
 */
-int aria_backup_start(THD *thd, backup_target target) noexcept;
+int aria_backup_start(THD *thd, const backup_target &target,
+                      backup_phase phase) noexcept;
 
 /**
-   Process a file that was collected in backup_start().
+   Process a file that was collected in aria_backup_start().
    @param thd   current session
-   @return number of files remaining, or negative on error
+   @param target  backup target
+   @param phase   last phase on which backup_start() was successfully invoked
    @retval 0 on completion
 */
-int aria_backup_step(THD *thd) noexcept;
+int aria_backup_step(THD *thd, const backup_target &target,
+                     backup_phase phase) noexcept;
 
 /**
-   Finish copying and determine the logical time of the backup snapshot.
+   Finish a phase, once all calls for the current phase are completed.
    @param thd   current session
-   @param abort whether BACKUP SERVER was aborted
+   @param target  backup target
+   @param phase   current backup phase, or
+   one of the special values BACKUP_PHASE_ABORT or BACKUP_PHASE_FINISH
    @return error code
    @retval 0 on success
 */
-int aria_backup_end(THD *thd, bool abort) noexcept;
+int aria_backup_end(THD *thd, const backup_target &target,
+                    backup_phase phase) noexcept;

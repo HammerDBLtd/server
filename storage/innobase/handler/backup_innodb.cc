@@ -47,9 +47,6 @@ class InnoDB_backup
   hard-linked, copied, or moved */
   std::vector<lsn_t> logs;
 
-  /** backup target */
-  backup_target target;
-
   /** @return the backup context */
   backup_context &context() const noexcept
   { ut_ad(log_sys.latch_have_any()); ut_ad(trx); return trx->lock.backup; }
@@ -104,7 +101,6 @@ public:
       ctx.last_lsn= 0;
       ctx.archived= !old_size;
 
-      this->target= target;
       /* Collect all tablespaces that have been created before our
       start checkpoint. Newer tablespaces will be recovered by the
       innodb_log_archive=ON recovery.
@@ -142,11 +138,12 @@ public:
   /**
      Process a file that was collected at init().
      This may be invoked from multiple concurrent threads.
-     @param thd   current session
+     @param thd     current session
+     @param target  backup target
      @return number of files remaining, or negative on error
      @retval 0 on completion
   */
-  int step(THD *thd) noexcept
+  int step(THD *thd, const backup_target &target) noexcept
   {
     uint32_t id= FIL_NULL;
     lsn_t lsn= 0;
@@ -182,7 +179,7 @@ public:
       uint32_t start{0};
       for (fil_node_t *node= UT_LIST_GET_FIRST(space->chain); node;
            start+= node->size, node= UT_LIST_GET_NEXT(chain, node))
-        if ((res= backup(node, start)))
+        if ((res= backup(target, node, start)))
           break;
       space->release();
       if (res)
@@ -194,18 +191,29 @@ public:
   }
 
   /**
-     Finish copying and determine the logical time of the backup snapshot.
-     fini() must be invoked on the same thd.
-     @param thd   current session
-     @param abort whether BACKUP SERVER was aborted
+     Finish copying or finalize the backup.
+     @param thd     current session
+     @param target  backup target
+     @param phase   backup phase
      @return error code
      @retval 0 on success
   */
-  int end(THD *thd, bool abort) noexcept
+  int end(THD *thd, const backup_target &target, backup_phase phase) noexcept
   {
+    switch (phase) {
+    default:
+      return 0;
+    case BACKUP_PHASE_FINISH:
+      return fini(thd, target);
+    case BACKUP_PHASE_NO_COMMIT:
+      /* Determine the logical time of the backup snapshot */
+    case BACKUP_PHASE_ABORT:
+      break;
+    }
+
     int fail= 0;
     log_sys.latch.wr_lock();
-    if (abort)
+    if (phase == BACKUP_PHASE_ABORT)
     {
     skip_log_dup:
       queue.clear();
@@ -487,10 +495,12 @@ private:
 
   /**
      Back up a persistent InnoDB data file.
-     @param node  InnoDB data file
-     @param start first page number
+     @param target backup target
+     @param node   InnoDB data file
+     @param start  first page number
   */
-  int backup(fil_node_t *node, uint32_t start) noexcept
+  int backup(const backup_target &target, fil_node_t *node, uint32_t start)
+    noexcept
   {
     for (bool tried_mkdir{false};;)
     {
@@ -909,24 +919,22 @@ void log_t::backup_stop(uint64_t old_size, THD *thd) noexcept
     resize_finish(thd);
 }
 
-int innodb_backup_start(THD *thd, backup_target target) noexcept
+int innodb_backup_start(THD *thd, const backup_target &target,
+                        backup_phase phase) noexcept
 {
-  return innodb_backup.init(thd, target);
+  return phase == BACKUP_PHASE_START && innodb_backup.init(thd, target);
 }
 
-int innodb_backup_step(THD *thd) noexcept
+int innodb_backup_step(THD *thd, const backup_target &target,
+                       backup_phase phase) noexcept
 {
-  return innodb_backup.step(thd);
+  return phase == BACKUP_PHASE_START && innodb_backup.step(thd, target);
 }
 
-int innodb_backup_end(THD *thd, bool abort) noexcept
+int innodb_backup_end(THD *thd, const backup_target &target,
+                      backup_phase phase) noexcept
 {
-  return innodb_backup.end(thd, abort);
-}
-
-int innodb_backup_finalize(THD *thd, backup_target target) noexcept
-{
-  return innodb_backup.fini(thd, target);
+  return innodb_backup.end(thd, target, phase);
 }
 
 void innodb_backup_checkpoint() noexcept

@@ -1514,6 +1514,29 @@ struct backup_target
   static constexpr IF_WIN(HANDLE,int) stream{NO_STREAM};
 };
 
+/** BACKUP SERVER execution phase */
+enum backup_phase
+{
+  /** finish backup, possibly after BACKUP_PHASE_ABORT */
+  BACKUP_PHASE_FINISH= -2,
+  /** abort any operation */
+  BACKUP_PHASE_ABORT= -1,
+  /** initial phase; @see MDL_BACKUP_START */
+  BACKUP_PHASE_START= 0,
+  /** copy while new writes to non-transactional tables are blocked;
+  @see MDL_BACKUP_FLUSH */
+  BACKUP_PHASE_NO_BEGIN_NON_TRANS,
+  /** copy while any writes to non-transactional tables are blocked;
+  @see MDL_BACKUP_WAIT_FLUSH */
+  BACKUP_PHASE_NO_DML_NON_TRANS,
+  /** copy files while DDL is blocked; @see MDL_BACKUP_WAIT_DDL */
+  BACKUP_PHASE_NO_DDL,
+  /** determine the logical time of the backup and copy any
+  remaining files while MDL_BACKUP_WAIT_COMMIT is active;
+  this is followed by BACKUP_PHASE_FINISH */
+  BACKUP_PHASE_NO_COMMIT
+};
+
 /*
   handlerton is a singleton structure - one instance per storage engine -
   to provide access to storage engine functionality that works on the
@@ -1917,36 +1940,36 @@ struct handlerton : public transaction_participant
   void (*end_backup)(void);
 
   /**
-     Start of BACKUP SERVER: collect all files to be backed up
+     Start of a BACKUP SERVER phase,
+     when no backup_step() or backup_end() is pending.
      @param thd     current session
      @param target  backup target
+     @param phase   BACKUP_PHASE_START, ...
      @return error code
      @retval 0 on success
   */
-  int (*backup_start)(THD *thd, backup_target target);
+  int (*backup_start)(THD *thd, const backup_target &target,
+                      backup_phase phase);
   /**
      Process a file that was collected in backup_start().
-     @param thd   current session
+     @param thd     current session
+     @param target  backup target
+     @param phase   last phase on which backup_start() was successfully invoked
      @return number of files remaining, or negative on error
      @retval 0 on completion
   */
-  int (*backup_step)(THD *thd);
+  int (*backup_step)(THD *thd, const backup_target &target,
+                     backup_phase phase);
   /**
-     Finish copying and determine the logical time of the backup snapshot.
-     @param thd   current sesssion
-     @param abort whether BACKUP SERVER was aborted
-     @return error code
-     @retval 0 on success
-  */
-  int (*backup_end)(THD *thd, bool abort);
-  /**
-     Clean up after any backup_end().
-     @param thd     the parameter on which backup_end() was invoked
+     Finish a phase, once all calls for the current phase are completed.
+     @param thd     current sesssion
      @param target  backup target
+     @param phase   current backup phase, or
+     one of the special values BACKUP_PHASE_ABORT or BACKUP_PHASE_FINISH
      @return error code
      @retval 0 on success
   */
-  int (*backup_finalize)(THD *thd, backup_target target);
+  int (*backup_end)(THD *thd, const backup_target &target, backup_phase phase);
 
   /**********************************************************************
    WSREP specific

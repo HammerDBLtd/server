@@ -14,39 +14,39 @@
    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
 /**
-   Start of BACKUP SERVER: collect all files to be backed up
+   Start of a BACKUP SERVER phase,
+   when no innodb_backup_step() or innodb_backup_end() is pending.
    @param thd     current session
    @param target  backup target
+   @param phase   BACKUP_PHASE_START, ...
    @return error code
    @retval 0 on success
 */
-int innodb_backup_start(THD *thd, backup_target target) noexcept;
+int innodb_backup_start(THD *thd, const backup_target &target,
+                        backup_phase phase) noexcept;
 
 /**
-   Process a file that was collected in backup_start().
-   @param thd   current session
+   Process a file that was collected in innodb_backup_start().
+   @param thd     current session
+   @param target  backup target
+   @param phase   last phase on which backup_start() was successfully invoked
    @return number of files remaining, or negative on error
    @retval 0 on completion
 */
-int innodb_backup_step(THD *thd) noexcept;
+int innodb_backup_step(THD *thd, const backup_target &target,
+                       backup_phase phase) noexcept;
 
 /**
-   Finish copying and determine the logical time of the backup snapshot.
-   @param thd   current session
-   @param abort whether BACKUP SERVER was aborted
-   @return error code
-   @retval 0 on success
-*/
-int innodb_backup_end(THD *thd, bool abort) noexcept;
-
-/**
-   Clean up after innodb_backup_end().
-   @param thd     the parameter on which innodb_backup_end() had been invoked
+   Finish a phase, once all calls for the current phase are completed.
+   @param thd     current sesssion
    @param target  backup target
+   @param phase   current backup phase, or
+   one of the special values BACKUP_PHASE_ABORT or BACKUP_PHASE_FINISH
    @return error code
    @retval 0 on success
 */
-int innodb_backup_finalize(THD *thd, backup_target target) noexcept;
+int innodb_backup_end(THD *thd, const backup_target &target,
+                      backup_phase phase) noexcept;
 
 /**
    Complete the first checkpoint in a new archive log file.

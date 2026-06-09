@@ -260,39 +260,42 @@ extern "C" int backup_config_append(const backup_target *target,
   return -1;
 }
 
-static my_bool backup_start(THD *thd, plugin_ref plugin, void *dst) noexcept
+struct backup_target_phase
+{
+  const backup_target &target;
+  backup_phase phase;
+};
+
+static my_bool backup_start(THD *thd, plugin_ref plugin, void *arg) noexcept
 {
   handlerton *hton= plugin_hton(plugin);
+  const backup_target_phase &t{*static_cast<backup_target_phase*>(arg)};
+  assert(int{t.phase} >= 0);
   if (hton->backup_start)
-    return hton->backup_start(thd, *static_cast<backup_target*>(dst));
+    return hton->backup_start(thd, t.target, t.phase);
   return false;
 }
 
 static my_bool backup_end(THD *thd, plugin_ref plugin, void *arg) noexcept
 {
   handlerton *hton= plugin_hton(plugin);
+  const backup_target_phase &t{*static_cast<backup_target_phase*>(arg)};
   if (hton->backup_end)
-    return hton->backup_end(thd, arg != nullptr);
+    return hton->backup_end(thd, t.target, t.phase);
   return false;
 }
 
-static my_bool backup_step(THD *thd, plugin_ref plugin, void *) noexcept
+static my_bool backup_step(THD *thd, plugin_ref plugin, void *arg) noexcept
 {
   handlerton *hton= plugin_hton(plugin);
+  const backup_target_phase &t{*static_cast<backup_target_phase*>(arg)};
+  assert(int{t.phase} >= 0);
   int res= 0;
   if (hton->backup_step)
-    while ((res= hton->backup_step(thd)))
+    while ((res= hton->backup_step(thd, t.target, t.phase)))
       if (res < 0)
         break;
   return res != 0;
-}
-
-static my_bool backup_finalize(THD *thd, plugin_ref plugin, void *dst) noexcept
-{
-  handlerton *hton= plugin_hton(plugin);
-  if (hton->backup_finalize)
-    return hton->backup_finalize(thd, *static_cast<backup_target*>(dst));
-  return 0;
 }
 
 bool Sql_cmd_backup::execute(THD *thd)
@@ -336,32 +339,54 @@ bool Sql_cmd_backup::execute(THD *thd)
     goto err_exit;
   }
 #endif
+  bool fail{false};
 
-  bool fail= plugin_foreach_with_mask(thd, backup_start,
-                                      MYSQL_STORAGE_ENGINE_PLUGIN,
-                                      PLUGIN_IS_DELETED|PLUGIN_IS_READY, &dir);
+  static constexpr struct {
+    backup_phase name; enum_mdl_type mdl;
+  } phases[] {
+    { BACKUP_PHASE_START, MDL_BACKUP_START },
+    { BACKUP_PHASE_NO_BEGIN_NON_TRANS, MDL_BACKUP_FLUSH },
+    { BACKUP_PHASE_NO_DML_NON_TRANS, MDL_BACKUP_WAIT_FLUSH },
+    { BACKUP_PHASE_NO_DDL, MDL_BACKUP_WAIT_DDL },
+    { BACKUP_PHASE_NO_COMMIT, MDL_BACKUP_WAIT_COMMIT }
+  };
 
-  /* The backup_step may be invoked in multiple concurrent threads.
-  At the time backup_end is invoked, all backup_step will have to complete. */
-  if (!fail)
+  for (const auto &phase : phases)
+  {
+    backup_target_phase t{dir, phase.name};
+    assert(!fail);
+    fail= phase.mdl != MDL_BACKUP_START &&
+      thd->mdl_context.upgrade_shared_lock(mdl_request.ticket,
+                                           phase.mdl,
+                                           thd->variables.lock_wait_timeout);
+    if (fail)
+      break;
+    fail= plugin_foreach_with_mask(thd, backup_start,
+                                   MYSQL_STORAGE_ENGINE_PLUGIN,
+                                   PLUGIN_IS_DELETED|PLUGIN_IS_READY, &t);
+    if (fail)
+      break;
+    /* TO DO: invoke backup_step from multiple concurrent threads. */
     fail= plugin_foreach_with_mask(thd, backup_step,
                                    MYSQL_STORAGE_ENGINE_PLUGIN,
-                                   PLUGIN_IS_DELETED|PLUGIN_IS_READY, nullptr);
-
-  fail=
-    thd->mdl_context.upgrade_shared_lock(mdl_request.ticket,
-                                         MDL_BACKUP_WAIT_COMMIT,
-                                         thd->variables.lock_wait_timeout) ||
-    plugin_foreach_with_mask(thd, backup_end, MYSQL_STORAGE_ENGINE_PLUGIN,
-                             PLUGIN_IS_DELETED|PLUGIN_IS_READY,
-                             reinterpret_cast<void*>(fail)) || fail;
+                                   PLUGIN_IS_DELETED|PLUGIN_IS_READY, &t);
+    /* After all backup_step are completed, finish the phase. */
+    if (fail)
+      break;
+    fail=
+      plugin_foreach_with_mask(thd, backup_end, MYSQL_STORAGE_ENGINE_PLUGIN,
+                               PLUGIN_IS_DELETED|PLUGIN_IS_READY, &t);
+    if (fail)
+      break;
+  }
 
   /* The final part must not interfere with the use of the server datadir.
   Release the locks. */
   thd->mdl_context.release_lock(mdl_request.ticket);
-  fail= plugin_foreach_with_mask(thd, backup_finalize,
+  backup_target_phase finish{dir, BACKUP_PHASE_FINISH};
+  fail= plugin_foreach_with_mask(thd, backup_end,
                                  MYSQL_STORAGE_ENGINE_PLUGIN,
-                                 PLUGIN_IS_DELETED|PLUGIN_IS_READY, &dir) ||
+                                 PLUGIN_IS_DELETED|PLUGIN_IS_READY, &finish) ||
     fail;
 #ifndef _WIN32
   close(dir.fd);
