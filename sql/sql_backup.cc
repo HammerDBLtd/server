@@ -208,14 +208,15 @@ extern "C" int copy_file(IF_WIN(const native_file_handle&,int) src,
 @param size     length of the snippet
 @return error code (non-positive)
 @retval 0   on success */
-extern "C" int backup_config_append(const backup_target &target,
+extern "C" int backup_config_append(const backup_target *target,
                                     const char *config, size_t size)
 {
   /* FIXME: append to a pre-created configuration file */
+  assert(target->stream == backup_target::NO_STREAM);
 #ifdef _WIN32
   HANDLE dst;
   {
-    std::string path{target.path};
+    std::string path{target->path};
     path.append("/backup.cnf");
     dst= CreateFile(path.c_str(), GENERIC_WRITE, 0,
                     my_win_file_secattr(), CREATE_NEW,
@@ -238,8 +239,7 @@ extern "C" int backup_config_append(const backup_target &target,
     }
   }
 #else
-  assert(target.stream == target.NO_STREAM);
-  int dst= openat(target.fd, "backup.cnf",
+  int dst= openat(target->fd, "backup.cnf",
                   O_CREAT | O_EXCL | O_TRUNC | O_WRONLY, 0666);
   if (dst < 0)
     return dst;

@@ -633,7 +633,7 @@ private:
                "innodb_log_recovery_start=" LSN_PF "\n"
                "innodb_log_recovery_target=" LSN_PF "\n",
                ctx.checkpoint, ctx.checkpoint_end_lsn, ctx.last_lsn);
-    return backup_config_append(target, config, size_t(size));
+    return backup_config_append(&target, config, size_t(size));
   }
 
   /** Hard-link (copy) or rename (move) an archive log file.

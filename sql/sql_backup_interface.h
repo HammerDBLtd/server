@@ -67,5 +67,5 @@ extern "C"
 @param size     length of the snippet
 @return error code (non-positive)
 @retval 0   on success */
-int backup_config_append(const backup_target &target,
+int backup_config_append(const backup_target *target,
                          const char *config, size_t size);
