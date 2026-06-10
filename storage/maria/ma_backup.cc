@@ -105,16 +105,9 @@ namespace
 #endif // _WIN32
     }
 
-    int end(THD *thd, backup_phase phase) noexcept
+    int end(THD *thd) noexcept
     {
-      int ret_val = 0;
-      if (phase == BACKUP_PHASE_NO_COMMIT) {
-#if 1 // FIXME: invoke these only for Aria, MyISAM, CSV but not InnoDB, RocksDB
-        tc_purge();
-        tdc_purge(true);
-#endif
-        ret_val= perform_backup();
-      }
+      int ret_val= perform_backup();
       translog_enable_purge();
       return ret_val;
     }
@@ -342,9 +335,11 @@ namespace
   std::unique_ptr<Aria_backup> aria_backup;
 }
 
-int aria_backup_start(THD *thd, const backup_target &target, backup_phase)
-  noexcept
+int aria_backup_start(THD *thd, const backup_target &target,
+                      backup_phase phase) noexcept
 {
+  if (phase != BACKUP_PHASE_NO_COMMIT)
+    return 0;
   aria_backup= std::make_unique<Aria_backup>(thd, target);
   return !aria_backup->is_initialized();
 }
@@ -357,7 +352,13 @@ int aria_backup_step(THD *, const backup_target &, backup_phase) noexcept
 int aria_backup_end(THD *thd, const backup_target &,
                     backup_phase phase) noexcept
 {
-  int ret_val= aria_backup->end(thd, phase);
+  if (phase != BACKUP_PHASE_NO_COMMIT)
+    return 0;
+#if 1 // FIXME: invoke these only for Aria, MyISAM, CSV but not InnoDB, RocksDB
+  tc_purge();
+  tdc_purge(true);
+#endif
+  int ret_val= aria_backup->end(thd);
   aria_backup.reset();
   return ret_val;
 }
