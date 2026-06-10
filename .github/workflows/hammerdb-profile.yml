@@ -1,0 +1,190 @@
+name: HammerDB Profile
+
+permissions:
+  contents: write
+
+'on':
+  schedule:
+    # 00:00 UTC: pick latest upstream MariaDB/server main commit and run normal profile
+    - cron: '0 0 * * *'
+
+    # 12:00 UTC: reuse the same commit and run IO intensive profile
+    - cron: '0 12 * * *'
+
+  workflow_dispatch:
+    inputs:
+      io_intensive:
+        description: 'IO intensive?'
+        required: true
+        default: '0'
+        type: choice
+        options:
+          - '0'
+          - '1'
+
+jobs:
+  hammerdb-profile:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          set -euo pipefail
+          git config --global user.email "github-actions@github.com"
+          git config --global user.name "GitHub Actions"
+
+      - name: Add upstream remote
+        run: |
+          set -euo pipefail
+          git remote get-url upstream || git remote add upstream https://github.com/MariaDB/server.git
+
+      - name: Fetch upstream
+        run: |
+          set -euo pipefail
+          git fetch --prune upstream "+refs/heads/main:refs/remotes/upstream/main"
+
+      - name: Select commit and IO flag
+        run: |
+          set -euo pipefail
+
+          mkdir -p .hammerdb
+
+          EVENT_NAME="${{ github.event_name }}"
+          EVENT_SCHEDULE="${{ github.event.schedule }}"
+          INPUT_IO="${{ github.event.inputs.io_intensive }}"
+          TODAY_UTC="$(date -u +%F)"
+
+          SKIP_RUN="0"
+
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            TEST_SHA="$(git rev-parse refs/remotes/upstream/main)"
+
+            if [ -z "$INPUT_IO" ]; then
+              IO_INTENSIVE="0"
+            else
+              IO_INTENSIVE="$INPUT_IO"
+            fi
+
+            echo "$TEST_SHA" > .hammerdb/nightly-sha.txt
+            echo "$TODAY_UTC" > .hammerdb/nightly-date.txt
+
+          elif [ "$EVENT_SCHEDULE" = "0 0 * * *" ]; then
+            TEST_SHA="$(git rev-parse refs/remotes/upstream/main)"
+            IO_INTENSIVE="0"
+
+            PREVIOUS_SHA=""
+            if [ -f .hammerdb/nightly-sha.txt ]; then
+              PREVIOUS_SHA="$(cat .hammerdb/nightly-sha.txt | tr -d '[:space:]')"
+            fi
+
+            if [ "$TEST_SHA" = "$PREVIOUS_SHA" ]; then
+              echo "No new upstream commit since last selected SHA."
+              echo "Latest SHA: $TEST_SHA"
+              echo "Skipping normal profile run."
+              SKIP_RUN="1"
+            else
+              echo "$TEST_SHA" > .hammerdb/nightly-sha.txt
+              echo "$TODAY_UTC" > .hammerdb/nightly-date.txt
+            fi
+
+          elif [ "$EVENT_SCHEDULE" = "0 12 * * *" ]; then
+            IO_INTENSIVE="1"
+
+            if [ ! -f .hammerdb/nightly-sha.txt ]; then
+              echo "No .hammerdb/nightly-sha.txt found."
+              echo "Skipping IO intensive run."
+              TEST_SHA=""
+              SKIP_RUN="1"
+
+            elif [ ! -f .hammerdb/nightly-date.txt ]; then
+              echo "No .hammerdb/nightly-date.txt found."
+              echo "Skipping IO intensive run."
+              TEST_SHA=""
+              SKIP_RUN="1"
+
+            else
+              TEST_SHA="$(cat .hammerdb/nightly-sha.txt | tr -d '[:space:]')"
+              SELECTED_DATE="$(cat .hammerdb/nightly-date.txt | tr -d '[:space:]')"
+
+              if [ "$SELECTED_DATE" != "$TODAY_UTC" ]; then
+                echo "No new SHA selected today."
+                echo "Saved SHA date: $SELECTED_DATE"
+                echo "Today UTC: $TODAY_UTC"
+                echo "Skipping IO intensive run."
+                SKIP_RUN="1"
+              fi
+            fi
+
+          else
+            echo "ERROR: Unknown trigger"
+            echo "EVENT_NAME=$EVENT_NAME"
+            echo "EVENT_SCHEDULE=$EVENT_SCHEDULE"
+            exit 1
+          fi
+
+          echo "TEST_SHA=$TEST_SHA" >> "$GITHUB_ENV"
+          echo "IO_INTENSIVE=$IO_INTENSIVE" >> "$GITHUB_ENV"
+          echo "SKIP_RUN=$SKIP_RUN" >> "$GITHUB_ENV"
+
+          echo "Selected commit: $TEST_SHA"
+          echo "IO intensive: $IO_INTENSIVE"
+          echo "Skip run: $SKIP_RUN"
+
+      - name: Save selected SHA back to fork
+        if: env.SKIP_RUN != '1' && (github.event.schedule == '0 0 * * *' || github.event_name == 'workflow_dispatch')
+        run: |
+          set -euo pipefail
+
+          git add .hammerdb/nightly-sha.txt .hammerdb/nightly-date.txt
+
+          if git diff --cached --quiet; then
+            echo "No SHA/date file changes to commit"
+          else
+            git commit -m "Update HammerDB nightly benchmark SHA"
+            git push
+          fi
+
+      - name: Trigger HammerDB CI listener
+        env:
+          HAMMERDB_WEBHOOK_URL: ${{ secrets.HAMMERDB_WEBHOOK_URL }}
+          HAMMERDB_WEBHOOK_TOKEN: ${{ secrets.HAMMERDB_WEBHOOK_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ "${SKIP_RUN:-0}" = "1" ]; then
+            echo "Skipping HammerDB CI trigger."
+            exit 0
+          fi
+
+          if [ -z "${HAMMERDB_WEBHOOK_URL:-}" ]; then
+            echo "ERROR: HAMMERDB_WEBHOOK_URL secret is not set"
+            exit 1
+          fi
+
+          if [ -z "${HAMMERDB_WEBHOOK_TOKEN:-}" ]; then
+            echo "ERROR: HAMMERDB_WEBHOOK_TOKEN secret is not set"
+            exit 1
+          fi
+
+          echo "Triggering HammerDB CI listener"
+          echo "Ref: $TEST_SHA"
+          echo "Database: maria"
+          echo "Pipeline: profile"
+          echo "Workload: C"
+          echo "IO intensive: $IO_INTENSIVE"
+
+          curl -i -sS -X POST "$HAMMERDB_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -H "X-HammerDB-Token: $HAMMERDB_WEBHOOK_TOKEN" \
+            -d "{
+              \"ref\":\"$TEST_SHA\",
+              \"database\":\"maria\",
+              \"pipeline\":\"profile\",
+              \"workload\":\"C\",
+              \"io_intensive\":$IO_INTENSIVE
+            }"
