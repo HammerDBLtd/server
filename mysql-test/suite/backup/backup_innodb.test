@@ -7,6 +7,11 @@ ENGINE=INNODB;
 BEGIN;
 INSERT INTO t SET a=1;
 
+CREATE TABLE at1(i INTEGER) ENGINE=Aria TRANSACTIONAL=1;
+INSERT INTO at1 VALUES (2), (3), (5), (7);
+CREATE TABLE at0 (i INTEGER) ENGINE=Aria TRANSACTIONAL=0;
+INSERT INTO at0 VALUES (1), (1), (2), (3), (5);
+
 --let $target_directory=/tmp/some_directory$MTR_COMBINATION_ARCHIVED
 # comment out the following line (and some more, including rmdir),
 # to test cross-filesystem copy
@@ -48,6 +53,7 @@ eval BACKUP SERVER TO '$target_directory';
 ROLLBACK;
 SELECT * FROM t;
 DELETE FROM t;
+DROP TABLE at0, at1;
 
 if ($MARIADB_UPGRADE_EXE) {
 let target_directory=$target_directory;
@@ -66,9 +72,19 @@ if (!$MARIADB_UPGRADE_EXE) {
 --source include/restart_mysqld.inc
 
 SELECT * FROM t;
-# we must have started up with nonzero innodb_log_recovery_target
+# A nonzero innodb_log_recovery_target makes InnoDB read-only.
 --error ER_OPEN_AS_READONLY
 DELETE FROM t;
+# Non-InnoDB tables are read-write.
+SELECT * FROM at0;
+SELECT * FROM at1;
+--error ER_OPEN_AS_READONLY
+DROP TABLE t, at0, at1;
+--error ER_NO_SUCH_TABLE
+SELECT * FROM at0;
+--error ER_NO_SUCH_TABLE
+SELECT * FROM at1;
+
 --let $restart_parameters=
 --source include/restart_mysqld.inc
 SELECT * FROM t;
