@@ -5241,8 +5241,7 @@ prepare_fk_prelocking_list(THD *thd, Query_tables_list *prelocking_ctx,
               fk->foreign_db, fk->foreign_table, NULL, lock_type,
               TABLE_LIST::PRELOCK_FK, table_list->belong_to_view, op,
               &prelocking_ctx->query_tables_last, &key,
-              table_list->for_insert_data,
-              override_fk_ignore_table);
+              table_list->for_insert_data);
 #ifdef WITH_WSREP
       /*
         Append table level shared key for the referenced/foreign table for:
