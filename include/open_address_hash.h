@@ -421,9 +421,9 @@ struct Open_address_hash_key_trait
 
   static Hash_value_type get_hash_value(const Key *key)
   {
-    ulong nr1= 1, nr2= 4;
-    my_ci_hash_sort(&my_charset_bin, (uchar*) key, sizeof (Key), &nr1, &nr2);
-    return (Hash_value_type) nr1;
+    my_hasher_st hasher= my_hasher_mysql5x();
+    my_ci_hash_sort(&hasher, &my_charset_bin, (uchar*) key, sizeof (Key));
+    return (Hash_value_type) hasher.m_nr1;
   }
   /**
    Function returning key based on value, needed to be able to rehash the table
