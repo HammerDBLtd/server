@@ -186,5 +186,6 @@ jobs:
               \"database\":\"maria\",
               \"pipeline\":\"profile\",
               \"workload\":\"C\",
-              \"io_intensive\":$IO_INTENSIVE
+              \"io_intensive\":$IO_INTENSIVE,
+              \"collect_ash\":0
             }"
