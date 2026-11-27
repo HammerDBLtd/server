@@ -1514,8 +1514,7 @@ bool buf_pool_t::create() noexcept
   page_hash.create(2 * n_blocks);
   last_printout_time= time(nullptr);
 
-  mysql_mutex_init(flush_list_mutex_key, &flush_list_mutex,
-                   MY_MUTEX_INIT_FAST);
+  mysql_mutex_init(flush_list_mutex_key, &flush_list_mutex, nullptr);
 
   pthread_cond_init(&done_flush_LRU, nullptr);
   pthread_cond_init(&done_flush_list, nullptr);
